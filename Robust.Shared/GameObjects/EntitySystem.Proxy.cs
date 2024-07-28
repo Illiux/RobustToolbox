@@ -941,9 +941,10 @@ public partial class EntitySystem
     #region Stagged Update Tracker
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>() where TComp : IComponent, IStaggeredUpdate
+    protected StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>()
+        where TComp : IComponent, IStaggeredUpdate
     {
-        return EntityManager.GetStaggeredUpdateTracker<TComp>();
+        return EntityManager.GetStaggeredUpdateTracker<TComp>(Subs);
     }
     #endregion
 

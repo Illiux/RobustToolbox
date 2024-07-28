@@ -154,13 +154,64 @@ namespace Robust.Shared.GameObjects
             _subscriptions = default;
         }
 
+        public interface ISubscriptions
+        {
+            void SubEvent<T>(
+                EventSource src,
+                EntityEventHandler<T> handler,
+                Type[]? before = null, Type[]? after = null)
+                where T : notnull;
+
+            void SubSessionEvent<T>(
+                EventSource src,
+                EntitySessionEventHandler<T> handler,
+                Type[]? before = null, Type[]? after = null)
+                where T : notnull;
+
+            void SubscribeLocalEvent<TComp, TEvent>(
+                ComponentEventHandler<TComp, TEvent> handler,
+                Type[]? before = null, Type[]? after = null)
+                where TComp : IComponent
+                where TEvent : notnull;
+
+            /// <summary>
+            /// Proxy to <see cref="M:Robust.Shared.GameObjects.EntitySystem.SubscribeLocalEvent``2(Robust.Shared.GameObjects.ComponentEventRefHandler{``0,``1},System.Type[],System.Type[])" />
+            /// on the owning system.
+            /// </summary>
+            void SubscribeLocalEvent<TComp, TEvent>(
+                ComponentEventRefHandler<TComp, TEvent> handler,
+                Type[]? before = null, Type[]? after = null)
+                where TComp : IComponent
+                where TEvent : notnull;
+
+            /// <summary>
+            /// Proxy to <see cref="M:Robust.Shared.GameObjects.EntitySystem.SubscribeLocalEvent``2(Robust.Shared.GameObjects.EntityEventRefHandler{``0,``1},System.Type[],System.Type[])" />
+            /// on the owning system.
+            /// </summary>
+            void SubscribeLocalEvent<TComp, TEvent>(
+                EntityEventRefHandler<TComp, TEvent> handler,
+                Type[]? before = null, Type[]? after = null)
+                where TComp : IComponent
+                where TEvent : notnull;
+
+            /// <summary>
+            /// Register an action to be ran when this entity system is shut down.
+            /// </summary>
+            /// <remarks>
+            /// This can be used by extension methods for <see cref="Subscriptions"/>
+            /// to unsubscribe from from external sources such as CVars.
+            /// </remarks>
+            /// <param name="action">An action to be ran when the entity system is shut down.</param>
+            void RegisterUnsubscription(Action action);
+        }
+
         /// <summary>
         /// API class to allow registering on an EntitySystem's behalf.
         /// Intended to support creation of boilerplate-reduction-methods
         /// that need to subscribe stuff on an entity system.
         /// </summary>
         [PublicAPI]
-        public sealed class Subscriptions
+        public sealed class Subscriptions : ISubscriptions
         {
             public EntitySystem System { get; }
 
@@ -193,7 +244,7 @@ namespace Robust.Shared.GameObjects
                 ComponentEventHandler<TComp, TEvent> handler,
                 Type[]? before = null, Type[]? after = null)
                 where TComp : IComponent
-                where TEvent : EntityEventArgs
+                where TEvent : notnull
             {
                 System.SubscribeLocalEvent(handler, before, after);
             }
@@ -206,7 +257,7 @@ namespace Robust.Shared.GameObjects
                 ComponentEventRefHandler<TComp, TEvent> handler,
                 Type[]? before = null, Type[]? after = null)
                 where TComp : IComponent
-                where TEvent : EntityEventArgs
+                where TEvent : notnull
             {
                 System.SubscribeLocalEvent(handler, before, after);
             }
@@ -219,7 +270,7 @@ namespace Robust.Shared.GameObjects
                 EntityEventRefHandler<TComp, TEvent> handler,
                 Type[]? before = null, Type[]? after = null)
                 where TComp : IComponent
-                where TEvent : EntityEventArgs
+                where TEvent : notnull
             {
                 System.SubscribeLocalEvent(handler, before, after);
             }

@@ -13,9 +13,11 @@ public partial class EntityManager
     [IoC.Dependency] private readonly IGameTiming _timing = default!;
     [IoC.Dependency] private readonly IRobustRandom _rng = default!;
 
-    public StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>() where TComp : IComponent, IStaggeredUpdate
+    public StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
+        EntitySystem.ISubscriptions subs
+        ) where TComp : IComponent, IStaggeredUpdate
     {
-        return new StaggeredUpdateTracker<TComp>(this, _rng, _timing);
+        return new StaggeredUpdateTracker<TComp>(subs, GetEntityQuery<TComp>(), _rng, _timing);
     }
 }
 
@@ -31,43 +33,37 @@ public sealed class StaggeredUpdateTracker<TComp> : IEnumerable<(EntityUid entit
     private readonly RingBufferList<(EntityUid entity, TimeSpan when)> _schedule = [];
     private readonly HashSet<EntityUid> _tracked = [];
 
-    private readonly IEntityManager _manager;
     private readonly EntityQuery<TComp> _query;
     private readonly IRobustRandom _rng;
     private readonly IGameTiming _timing;
+    private readonly TimeSpan _updateInterval;
 
-    internal StaggeredUpdateTracker(IEntityManager manager, IRobustRandom rng, IGameTiming timing)
+    public EntityEventRefHandler<TComp, MapInitEvent>? MapInit;
+
+    internal StaggeredUpdateTracker(
+        TimeSpan updateInterval,
+        EntitySystem.ISubscriptions subs,
+        EntityQuery<TComp> query,
+        IRobustRandom rng,
+        IGameTiming timing)
     {
-        _manager = manager;
-        _query = manager.GetEntityQuery<TComp>();
+        _query = query;
         _rng = rng;
         _timing = timing;
 
-        // Track all already existing entities
-        var qry = manager.AllEntityQueryEnumerator<TComp>();
-        while (qry.MoveNext(out var ent, out var comp))
-        {
-            Track(ent, comp.UpdateInterval);
-        }
-
-        // And automatically track later added ones
-        manager.ComponentAdded += OnComponentAdded;
+        subs.SubscribeLocalEvent<TComp, MapInitEvent>(OnMapInit);
     }
 
-    private void OnComponentAdded(AddedComponentEventArgs obj)
+    private void OnMapInit(Entity<TComp> ent, ref MapInitEvent args)
     {
-        if (obj.BaseArgs.Component is not TComp comp) return;
-        Track(obj.BaseArgs.Owner, comp.UpdateInterval);
-    }
-
-    private void Track(EntityUid entity, TimeSpan interval)
-    {
-        if (!_tracked.Add(entity)) return;
+        if (!_tracked.Add(ent.Owner)) return;
 
         // randomize an offset from the current tick, up to interval
         // we start from current tick + 1 because updates for the current tick may already have been processed
-        var when = _timing.CurTime + TimeSpan.FromTicks(1) + _rng.Next(TimeSpan.Zero, interval);
-        _insertQueue.Enqueue(entity, when);
+        var when = _timing.CurTime + _timing.TickPeriod + _rng.Next(TimeSpan.Zero, ent.Comp.UpdateInterval);
+        _insertQueue.Enqueue(ent.Owner, when);
+
+        MapInit?.Invoke(ent, ref args); // call a chained event handler if we have one
     }
 
     public IEnumerator<(EntityUid, TComp)> GetEnumerator()
@@ -96,8 +92,6 @@ public sealed class StaggeredUpdateTracker<TComp> : IEnumerable<(EntityUid entit
                 if (tracker._query.TryComp(entity, out var comp))
                 {
                     tracker._schedule.Add((entity, when + comp.UpdateInterval));
-
-                    if (tracker._manager.IsPaused(entity)) continue;
 
                     // If it's not paused, yield it from the enumerator
                     Current = (entity, comp);
