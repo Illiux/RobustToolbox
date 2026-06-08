@@ -13,13 +13,13 @@ using Robust.Shared.Utility;
 
 namespace Robust.Client.Debugging
 {
-    public sealed class DebugAnchoringSystem : EntitySystem
+    public sealed partial class DebugAnchoringSystem : EntitySystem
     {
-        [Dependency] private readonly IEyeManager _eyeManager = default!;
-        [Dependency] private readonly IInputManager _inputManager = default!;
-        [Dependency] private readonly IMapManager _mapManager = default!;
-        [Dependency] private readonly IUserInterfaceManager _userInterface = default!;
-        [Dependency] private readonly MapSystem _mapSystem = default!;
+        [Dependency] private IEyeManager _eyeManager = default!;
+        [Dependency] private IInputManager _inputManager = default!;
+        [Dependency] private IMapManager _mapManager = default!;
+        [Dependency] private IUserInterfaceManager _userInterface = default!;
+        [Dependency] private MapSystem _mapSystem = default!;
 
         private Label? _label;
 
@@ -82,7 +82,7 @@ namespace Robust.Client.Debugging
 
             foreach (var ent in _mapSystem.GetAnchoredEntities(gridUid, grid, spot))
             {
-                if (EntityManager.TryGetComponent<MetaDataComponent>(ent, out var meta))
+                if (TryComp(ent, out MetaDataComponent? meta))
                 {
                     text.AppendLine($"uid: {ent}, {meta.EntityName}");
                 }

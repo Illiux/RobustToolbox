@@ -148,7 +148,7 @@ namespace Robust.Shared.GameObjects
         {
             foreach (var sub in _subscriptions)
             {
-                sub.Unsubscribe(this, EntityManager.EventBus);
+                sub.Unsubscribe(this, EntityManager.EventBusInternal);
             }
 
             _subscriptions = default;
@@ -280,7 +280,7 @@ namespace Robust.Shared.GameObjects
             /// </summary>
             /// <remarks>
             /// This can be used by extension methods for <see cref="Subscriptions"/>
-            /// to unsubscribe from from external sources such as CVars.
+            /// to unsubscribe from external sources such as CVars.
             /// </remarks>
             /// <param name="action">An action to be ran when the entity system is shut down.</param>
             public void RegisterUnsubscription(Action action)

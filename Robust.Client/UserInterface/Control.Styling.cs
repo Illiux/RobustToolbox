@@ -19,6 +19,9 @@ namespace Robust.Client.UserInterface
             get => _stylesheet;
             set
             {
+                if (ReferenceEquals(_stylesheet, value))
+                    return;
+
                 _stylesheet = value;
                 StylesheetUpdateRecursive();
             }
@@ -128,7 +131,7 @@ namespace Robust.Client.UserInterface
             UserInterfaceManagerInternal.QueueStyleUpdate(this);
         }
 
-        internal void StyleSheetUpdate()
+        public void InvalidateStyleSheet()
         {
             _stylesheetUpdateNeeded = true;
 
@@ -137,7 +140,7 @@ namespace Robust.Client.UserInterface
 
         internal void StylesheetUpdateRecursive()
         {
-            StyleSheetUpdate();
+            InvalidateStyleSheet();
 
             foreach (var child in Children)
             {
@@ -149,7 +152,7 @@ namespace Robust.Client.UserInterface
             }
         }
 
-        internal void DoStyleUpdate()
+        public void DoStyleUpdate()
         {
             _styleProperties.Clear();
 

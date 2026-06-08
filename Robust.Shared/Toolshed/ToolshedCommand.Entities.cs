@@ -10,10 +10,10 @@ namespace Robust.Shared.Toolshed;
 public abstract partial class ToolshedCommand
 {
     [PublicAPI, IoC.Dependency]
-    protected readonly IEntityManager EntityManager = default!;
+    protected IEntityManager EntityManager = default!;
 
     [PublicAPI, IoC.Dependency]
-    protected readonly IEntitySystemManager EntitySystemManager = default!;
+    protected IEntitySystemManager EntitySystemManager = default!;
 
     /// <summary>
     ///     Returns the entity that's executing this command, if any.
@@ -153,6 +153,10 @@ public abstract partial class ToolshedCommand
     protected T GetSys<T>()
         where T: EntitySystem
         => EntitySystemManager.GetEntitySystem<T>();
+
+    // GetSys is just too many letters to type
+    [PublicAPI, MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected T Sys<T>() where T: EntitySystem => EntitySystemManager.GetEntitySystem<T>();
 
     /// <summary>
     ///     A shorthand for retrieving an entity query.

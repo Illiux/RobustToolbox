@@ -13,12 +13,12 @@ namespace Robust.Shared.Upload;
 /// <summary>
 ///     Manages sending runtime-loaded prototypes from game staff to clients.
 /// </summary>
-public abstract class SharedPrototypeLoadManager : IGamePrototypeLoadManager
+public abstract partial class SharedPrototypeLoadManager : IGamePrototypeLoadManager
 {
-    [Dependency] private readonly IReplayRecordingManager _replay = default!;
-    [Dependency] private readonly IPrototypeManager _prototypeManager = default!;
-    [Dependency] private readonly ILocalizationManager _localizationManager = default!;
-    [Dependency] protected readonly INetManager NetManager = default!;
+    [Dependency] private IReplayRecordingManager _replay = default!;
+    [Dependency] private IPrototypeManager _prototypeManager = default!;
+    [Dependency] private ILocalizationManager _localizationManager = default!;
+    [Dependency] protected INetManager NetManager = default!;
 
     [Access(typeof(SharedPrototypeLoadManager))]
     public readonly List<string> LoadedPrototypes = new();
@@ -42,7 +42,6 @@ public abstract class SharedPrototypeLoadManager : IGamePrototypeLoadManager
 
         var changed = new Dictionary<Type, HashSet<string>>();
         _prototypeManager.LoadString(data, true, changed);
-        _prototypeManager.ResolveResults();
         _prototypeManager.ReloadPrototypes(changed);
         _localizationManager.ReloadLocalizations();
 

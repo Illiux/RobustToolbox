@@ -76,9 +76,9 @@ namespace Robust.Client.Graphics.Clyde
             }
 
             // Short path to render only the splash.
-            if (_drawingSplash)
+            if (_drawingLoadingScreen)
             {
-                DrawSplash(_renderHandle);
+                DrawLoadingScreen(_renderHandle);
                 FlushRenderQueue();
                 SwapAllBuffers();
                 return;
@@ -121,11 +121,29 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
+        public void RenderNow(IRenderTarget renderTarget, Action<IRenderHandle> callback)
+        {
+            ClearRenderState();
+
+            _renderHandle.RenderInRenderTarget(
+                renderTarget,
+                () =>
+                {
+                    callback(_renderHandle);
+                },
+                null);
+        }
+
         private void RenderSingleWorldOverlay(Overlay overlay, Viewport vp, OverlaySpace space, in Box2 worldBox, in Box2Rotated worldBounds)
         {
+            // Check that entity manager has started.
+            // This is required for us to be able to use MapSystem.
+            DebugTools.Assert(_entityManager.Started, "Entity manager should be started/initialized before rendering world-space overlays");
+
             DebugTools.Assert(space != OverlaySpace.ScreenSpaceBelowWorld && space != OverlaySpace.ScreenSpace);
 
-            var args = new OverlayDrawArgs(space, null, vp, _renderHandle.DrawingHandleWorld, new UIBox2i((0, 0), vp.Size), vp.Eye!.Position.MapId, worldBox, worldBounds);
+            var mapId = vp.Eye?.Position.MapId ?? MapId.Nullspace;
+            var args = new OverlayDrawArgs(space, null, vp, _renderHandle, new UIBox2i((0, 0), vp.Size), _mapSystem.GetMapOrInvalid(mapId), mapId, worldBox, worldBounds);
 
             if (!overlay.BeforeDraw(args))
                 return;
@@ -145,12 +163,21 @@ namespace Robust.Client.Graphics.Clyde
             }
             catch (Exception e)
             {
-                _logManager.GetSawmill("clyde.overlay").Error($"Caught exception while drawing overlay {overlay.GetType()}. Exception: {e}");
+                _logManager.GetSawmill("clyde.overlay")
+                    .Error($"Caught exception while drawing overlay {overlay.GetType()}. Exception: {e}");
+            }
+            finally
+            {
+                // cleanup state so shaders/transforms dont leak into future overlays
+                // many overlays already do cleanup manually, but ideally they don't have to at all
+                _renderHandle.SetModelTransform(Matrix3x2.Identity);
+                _renderHandle.UseShader(null);
             }
         }
 
         private void RenderOverlays(Viewport vp, OverlaySpace space, in Box2 worldBox, in Box2Rotated worldBounds)
         {
+            DebugTools.Assert(space != OverlaySpace.ScreenSpaceBelowWorld && space != OverlaySpace.ScreenSpace);
             using (DebugGroup($"Overlays: {space}"))
             {
                 foreach (var overlay in GetOverlaysForSpace(space))
@@ -165,7 +192,7 @@ namespace Robust.Client.Graphics.Clyde
         private void RenderOverlaysDirect(
             Viewport vp,
             IViewportControl vpControl,
-            DrawingHandleBase handle,
+            IRenderHandle handle,
             OverlaySpace space,
             in UIBox2i bounds)
         {
@@ -175,8 +202,18 @@ namespace Robust.Client.Graphics.Clyde
 
             var worldBounds = CalcWorldBounds(vp);
             var worldAABB = worldBounds.CalcBoundingBox();
+            var mapId = vp.Eye?.Position.MapId ?? MapId.Nullspace;
+            var mapUid = EntityUid.Invalid;
 
-            var args = new OverlayDrawArgs(space, vpControl, vp, handle, bounds, vp.Eye!.Position.MapId, worldAABB, worldBounds);
+            // Screen space overlays may be getting used before entity manager & entity systems have been initialized.
+            // This might mean that _mapSystem is currently null.
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+            if (_entityManager.Started && _mapSystem != null)
+                mapUid = _mapSystem.GetMapOrInvalid(mapId);
+
+            DebugTools.Assert(_mapSystem != null || !_entityManager.Started);
+
+            var args = new OverlayDrawArgs(space, vpControl, vp, handle, bounds, mapUid, mapId, worldAABB, worldBounds);
 
             foreach (var overlay in list)
             {
@@ -198,7 +235,16 @@ namespace Robust.Client.Graphics.Clyde
                 }
                 catch (Exception e)
                 {
-                    _logManager.GetSawmill("clyde.overlay").Error($"Caught exception while drawing overlay {overlay.GetType()}. Exception: {e}");
+                    _logManager.GetSawmill("clyde.overlay")
+                        .Error($"Caught exception while drawing overlay {overlay.GetType()}. Exception: {e}");
+                }
+                finally
+                {
+                    // cleanup state so shaders/transforms dont leak into future overlays
+                    // many overlays already do cleanup manually, but ideally they don't have to at all
+                    // screen and world handles are backed by the same renderhandle, so we only need to do this for one
+                    handle.DrawingHandleScreen.SetTransform(Matrix3x2.Identity);
+                    handle.DrawingHandleScreen.UseShader(null);
                 }
             }
         }
@@ -214,8 +260,6 @@ namespace Robust.Client.Graphics.Clyde
                     _overlays.Add(overlay);
                 }
             }
-
-            _overlays.Sort(OverlayComparer.Instance);
 
             return _overlays;
         }
@@ -304,7 +348,7 @@ namespace Robust.Client.Graphics.Clyde
                         screenSpriteSize.Y++;
 
                     bool exit = false;
-                    if (entry.Sprite.GetScreenTexture)
+                    if (entry.Sprite.GetScreenTexture && entry.Sprite.PostShader != null)
                     {
                         FlushRenderQueue();
                         var tex = CopyScreenTexture(viewport.RenderTarget);
@@ -355,7 +399,7 @@ namespace Robust.Client.Graphics.Clyde
                     }
                 }
 
-                spriteSystem.Render(entry.Uid, entry.Sprite, _renderHandle.DrawingHandleWorld, eye.Rotation, in entry.WorldRot, in entry.WorldPos);
+                spriteSystem.RenderSprite(new(entry.Uid, entry.Sprite), _renderHandle.DrawingHandleWorld, eye.Rotation, entry.WorldRot, entry.WorldPos);
 
                 if (entry.Sprite.PostShader != null && entityPostRenderTarget != null)
                 {
@@ -403,18 +447,11 @@ namespace Robust.Client.Graphics.Clyde
             FlushRenderQueue();
         }
 
-        private void DrawSplash(IRenderHandle handle)
+        private void DrawLoadingScreen(IRenderHandle handle)
         {
-            // Clear screen to black for splash.
             ClearFramebuffer(Color.Black);
 
-            var splashTex = _cfg.GetCVar(CVars.DisplaySplashLogo);
-            if (string.IsNullOrEmpty(splashTex))
-                return;
-
-            var texture = _resourceCache.GetResource<TextureResource>(splashTex).Texture;
-
-            handle.DrawingHandleScreen.DrawTexture(texture, (ScreenSize - texture.Size) / 2);
+            _loadingScreenManager.DrawLoadingScreen(handle, ScreenSize);
         }
 
         private void RenderInRenderTarget(RenderTargetBase rt, Action a, Color? clearColor=default)
@@ -423,11 +460,18 @@ namespace Robust.Client.Graphics.Clyde
 
             var oldTransform = _currentMatrixModel;
             var oldScissor = _currentScissorState;
+            var oldMatrixProj = _currentMatrixProj;
+            var oldMatrixView = _currentMatrixView;
+            var oldBoundTarget = _currentBoundRenderTarget;
+            var oldRenderTarget = _currentRenderTarget;
+            var oldShader = _queuedShaderInstance;
+            var oldCaps = _glCaps;
+
+            // Need to get state before flushing render queue in case they modify the original state.
+            var state = PushRenderStateFull();
 
             // Have to flush the render queue so that all commands finish rendering to the previous framebuffer.
             FlushRenderQueue();
-
-            var state = PushRenderStateFull();
 
             {
                 BindRenderTargetFull(RtToLoaded(rt));
@@ -450,14 +494,25 @@ namespace Robust.Client.Graphics.Clyde
             PopRenderStateFull(state);
             _updateUniformConstants(_currentRenderTarget.Size);
 
-            SetScissorFull(oldScissor);
             _currentMatrixModel = oldTransform;
+
+            DebugTools.Assert(oldCaps.Equals(_glCaps));
+            DebugTools.Assert(_currentMatrixModel.Equals(oldTransform));
+            DebugTools.Assert(_currentScissorState.Equals(oldScissor));
+            DebugTools.Assert(_currentMatrixProj.Equals(oldMatrixProj));
+            DebugTools.Assert(oldMatrixView.Equals(_currentMatrixView));
+            DebugTools.Assert(oldRenderTarget.Equals(_currentRenderTarget));
+            DebugTools.Assert(oldBoundTarget.Equals(_currentBoundRenderTarget));
+            DebugTools.Assert(oldShader.Equals(_queuedShaderInstance));
         }
 
         private void RenderViewport(Viewport viewport)
         {
             if (viewport.Eye == null || viewport.Eye.Position.MapId == MapId.Nullspace)
             {
+                if (viewport.ClearWhenMissingEye)
+                    RenderInRenderTarget(viewport.RenderTarget, () => { }, viewport.ClearColor);
+
                 return;
             }
 
@@ -466,8 +521,6 @@ namespace Robust.Client.Graphics.Clyde
             RenderInRenderTarget(viewport.RenderTarget, () =>
             {
                 using var _ = DebugGroup($"Viewport: {viewport.Name}");
-
-                var mapSystem = _entitySystemManager.GetEntitySystem<SharedMapSystem>();
 
                 var oldVp = _currentViewport;
 
@@ -488,7 +541,7 @@ namespace Robust.Client.Graphics.Clyde
                     using (DebugGroup("Lights"))
                     using (_prof.Group("Lights"))
                     {
-                        DrawLightsAndFov(mapSystem, viewport, worldBounds, worldAABB, eye);
+                        DrawLightsAndFov(viewport, worldBounds, worldAABB, eye);
                     }
 
                     using (_prof.Group("Overlays WSBW"))
@@ -516,7 +569,7 @@ namespace Robust.Client.Graphics.Clyde
 
                     if (_lightManager.Enabled && _lightManager.DrawHardFov && eye.DrawLight && eye.DrawFov)
                     {
-                        var mapUid = mapSystem.GetMap(eye.Position.MapId);
+                        var mapUid = _mapSystem.GetMap(eye.Position.MapId);
                         if (_entityManager.GetComponent<MapComponent>(mapUid).LightingEnabled)
                             ApplyFovToBuffer(viewport, eye);
                     }
@@ -575,18 +628,6 @@ namespace Robust.Client.Graphics.Clyde
             var aabb = GetAABB(eye, viewport);
 
             return new Box2Rotated(aabb, rotation, aabb.Center);
-        }
-
-        private sealed class OverlayComparer : IComparer<Overlay>
-        {
-            public static readonly OverlayComparer Instance = new();
-
-            public int Compare(Overlay? x, Overlay? y)
-            {
-                var zX = x?.ZIndex ?? 0;
-                var zY = y?.ZIndex ?? 0;
-                return zX.CompareTo(zY);
-            }
         }
     }
 }

@@ -12,6 +12,7 @@ namespace Robust.Client.GameStates
     /// <summary>
     ///     Engine service that provides processing and management of game states.
     /// </summary>
+    [NotContentImplementable]
     public interface IClientGameStateManager
     {
         /// <summary>
@@ -33,9 +34,6 @@ namespace Robust.Client.GameStates
         ///     Number of applicable game states currently in the state buffer.
         /// </summary>
         int GetApplicableStateCount();
-
-        [Obsolete("use GetApplicableStateCount()")]
-        int CurrentBufferSize => GetApplicableStateCount();
 
         /// <summary>
         ///     Total number of game states currently in the state buffer.
@@ -84,6 +82,8 @@ namespace Robust.Client.GameStates
         ///     Applies a given set of game states.
         /// </summary>
         IEnumerable<NetEntity> ApplyGameState(GameState curState, GameState? nextState);
+
+        void MergeImplicitData();
 
         /// <summary>
         ///     Resets any entities that have changed while predicting future ticks.

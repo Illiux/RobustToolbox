@@ -6,6 +6,7 @@ using System.Text;
 using JetBrains.Annotations;
 using Nett.Parser;
 using Robust.Shared.Maths;
+using Robust.Shared.RichText;
 using Robust.Shared.Serialization;
 
 namespace Robust.Shared.Utility;
@@ -14,9 +15,10 @@ namespace Robust.Shared.Utility;
 ///     Represents a formatted message in the form of a list of "tags".
 ///     Does not do any concrete formatting, simply useful as an API surface.
 /// </summary>
+/// <seealso cref="FormattedString"/>
 [PublicAPI]
 [Serializable, NetSerializable]
-public sealed partial class FormattedMessage : IReadOnlyList<MarkupNode>
+public sealed partial class FormattedMessage : IEquatable<FormattedMessage>, IReadOnlyList<MarkupNode>
 {
     public static FormattedMessage Empty => new();
 
@@ -132,6 +134,14 @@ public sealed partial class FormattedMessage : IReadOnlyList<MarkupNode>
     }
 
     /// <summary>
+    ///     Escape a string parameter value to be able to be formatted into markup.
+    /// </summary>
+    public static string EscapeStringParameter(string parameter)
+    {
+        return EscapeText(parameter).Replace("\"", "\\\"");
+    }
+
+    /// <summary>
     ///     Remove all markup, leaving only the basic text content behind. Throws if it fails to parse the markup tags.
     /// </summary>
     /// <exception cref="ParseException">Thrown when an error occurs while trying to parse the markup.</exception>
@@ -180,6 +190,31 @@ public sealed partial class FormattedMessage : IReadOnlyList<MarkupNode>
     public void PushNewline()
     {
         AddText("\n");
+    }
+
+    /// <summary>
+    /// Removes extraneous whitespace from the end of the message.
+    /// </summary>
+    public void TrimEnd()
+    {
+        while (_nodes.Count > 1)
+        {
+            var last = _nodes[^1];
+            if (last.Name == null && last.Value.TryGetString(out var text))
+            {
+                string trimmed = text.TrimEnd();
+                if (trimmed.Length == 0)
+                {
+                    _nodes.Pop();
+                    continue;
+                }
+                else if (trimmed != text)
+                {
+                    _nodes[^1] = new MarkupNode(trimmed);
+                }
+            }
+            break;
+        }
     }
 
     /// <summary>
@@ -251,6 +286,33 @@ public sealed partial class FormattedMessage : IReadOnlyList<MarkupNode>
     IEnumerator<MarkupNode> IEnumerable<MarkupNode>.GetEnumerator()
     {
         return GetEnumerator();
+    }
+
+    /// <inheritdoc />
+    public bool Equals(FormattedMessage? other)
+    {
+        if (_nodes.Count != other?._nodes.Count)
+            return false;
+
+        for (var i = 0; i < _nodes.Count; i++)
+        {
+            if (!_nodes[i].Equals(other?._nodes[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public override int GetHashCode()
+    {
+        var hash = 0;
+        foreach (var node in _nodes)
+        {
+            hash = HashCode.Combine(hash, node.GetHashCode());
+        }
+
+        return hash;
     }
 
     /// <returns>The string without markup tags.</returns>

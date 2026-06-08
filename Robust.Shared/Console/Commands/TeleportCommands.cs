@@ -15,11 +15,12 @@ using Robust.Shared.Utility;
 
 namespace Robust.Shared.Console.Commands;
 
-internal sealed class TeleportCommand : LocalizedEntityCommands
+internal sealed partial class TeleportCommand : LocalizedEntityCommands
 {
-    [Dependency] private readonly IMapManager _map = default!;
-    [Dependency] private readonly IEntityManager _entityManager = default!;
-    [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private IMapManager _map = default!;
+    [Dependency] private IEntityManager _entityManager = default!;
+    [Dependency] private SharedTransformSystem _transform = default!;
+    [Dependency] private SharedMapSystem _mapSystem = default!;
 
     public override string Command => "tp";
     public override bool RequireServerOrSingleplayer => true;
@@ -46,7 +47,7 @@ internal sealed class TeleportCommand : LocalizedEntityCommands
         else
             mapId = transform.MapID;
 
-        if (!_map.MapExists(mapId))
+        if (!_mapSystem.MapExists(mapId))
         {
             shell.WriteError($"Map {mapId} doesn't exist!");
             return;
@@ -60,20 +61,33 @@ internal sealed class TeleportCommand : LocalizedEntityCommands
         }
         else
         {
-            var mapEnt = _map.GetMapEntityIdOrThrow(mapId);
-            _transform.SetWorldPosition((entity, transform), position);
-            _transform.SetParent(entity, transform, mapEnt);
+            if (_mapSystem.TryGetMap(mapId, out var mapEnt))
+            {
+                _transform.SetWorldPosition((entity, transform), position);
+                _transform.SetParent(entity, transform, mapEnt.Value);
+            }
         }
 
         shell.WriteLine($"Teleported {shell.Player} to {mapId}:{posX},{posY}.");
     }
+
+    public override CompletionResult GetCompletion(IConsoleShell shell, string[] args)
+    {
+        return args.Length switch
+        {
+            1 => CompletionResult.FromHint("<x>"),
+            2 => CompletionResult.FromHint("<y>"),
+            3 => CompletionResult.FromHintOptions(CompletionHelper.MapIds(_entityManager), "[MapId]"),
+            _ => CompletionResult.Empty
+        };
+    }
 }
 
-public sealed class TeleportToCommand : LocalizedEntityCommands
+public sealed partial class TeleportToCommand : LocalizedEntityCommands
 {
-    [Dependency] private readonly ISharedPlayerManager _players = default!;
-    [Dependency] private readonly IEntityManager _entities = default!;
-    [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private ISharedPlayerManager _players = default!;
+    [Dependency] private IEntityManager _entities = default!;
+    [Dependency] private SharedTransformSystem _transform = default!;
 
     public override string Command => "tpto";
     public override bool RequireServerOrSingleplayer => true;
@@ -113,19 +127,20 @@ public sealed class TeleportToCommand : LocalizedEntityCommands
         {
             foreach (var victim in args)
             {
-                if (victim == target)
+                if (!TryGetTransformFromUidOrUsername(victim, shell, out var uid, out var victimTransform))
                     continue;
 
-                if (!TryGetTransformFromUidOrUsername(victim, shell, out var uid, out var victimTransform))
+                if (uid == targetUid)
                     continue;
 
                 victims.Add((uid.Value, victimTransform));
             }
         }
 
+        var targetMapCoords = _transform.ToMapCoordinates(targetCoords);
         foreach (var victim in victims)
         {
-            _transform.SetCoordinates(victim.Entity, targetCoords);
+            _transform.SetMapCoordinates(victim.Entity, targetMapCoords);
             _transform.AttachToGridOrMap(victim.Entity, victim.Transform);
         }
     }
@@ -145,7 +160,7 @@ public sealed class TeleportToCommand : LocalizedEntityCommands
             return true;
         }
 
-        if (_players.Sessions.TryFirstOrDefault(x => x.Channel.UserName == str, out var session)
+        if (_players.TryGetSessionByUsername(str, out var session)
             && _entities.TryGetComponent(session.AttachedEntity, out transform))
         {
             victimUid = session.AttachedEntity;
@@ -176,10 +191,10 @@ public sealed class TeleportToCommand : LocalizedEntityCommands
     }
 }
 
-sealed class LocationCommand : LocalizedEntityCommands
+sealed partial class LocationCommand : LocalizedEntityCommands
 {
-    [Dependency] private readonly IEntityManager _ent = default!;
-    [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private IEntityManager _ent = default!;
+    [Dependency] private SharedTransformSystem _transform = default!;
 
     public override string Command => "loc";
 
@@ -198,10 +213,10 @@ sealed class LocationCommand : LocalizedEntityCommands
     }
 }
 
-sealed class TpGridCommand : LocalizedEntityCommands
+sealed partial class TpGridCommand : LocalizedEntityCommands
 {
-    [Dependency] private readonly IEntityManager _ent = default!;
-    [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private IEntityManager _ent = default!;
+    [Dependency] private SharedMapSystem _map = default!;
 
     public override string Command => "tpgrid";
     public override bool RequireServerOrSingleplayer => true;

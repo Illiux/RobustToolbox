@@ -7,6 +7,8 @@ using Robust.Client.Placement;
 using Robust.Client.ResourceManagement;
 using Robust.Client.UserInterface.Controls;
 using Robust.Client.UserInterface.CustomControls;
+using Robust.Shared;
+using Robust.Shared.Configuration;
 using Robust.Shared.Enums;
 using Robust.Shared.IoC;
 using Robust.Shared.Prototypes;
@@ -17,11 +19,11 @@ using static Robust.Client.UserInterface.Controls.LineEdit;
 
 namespace Robust.Client.UserInterface.Controllers.Implementations;
 
-public sealed class EntitySpawningUIController : UIController
+public sealed partial class EntitySpawningUIController : UIController
 {
-    [Dependency] private readonly IPlacementManager _placement = default!;
-    [Dependency] private readonly IPrototypeManager _prototypes = default!;
-    [Dependency] private readonly IResourceCache _resources = default!;
+    [Dependency] private IConfigurationManager _cfg = default!;
+    [Dependency] private IPlacementManager _placement = default!;
+    [Dependency] private IPrototypeManager _prototypes = default!;
 
     private EntitySpawnWindow? _window;
     private readonly List<EntityPrototype> _shownEntities = new();
@@ -58,7 +60,7 @@ public sealed class EntitySpawningUIController : UIController
 
         _placement.Clear();
         // Only toggle the eraser back if the button is pressed.
-        if(args.Pressed)
+        if (args.Pressed)
             _placement.ToggleEraser();
         // clearing will toggle the erase button off...
         args.Button.Pressed = args.Pressed;
@@ -87,7 +89,7 @@ public sealed class EntitySpawningUIController : UIController
             return;
 
         _window = UIManager.CreateWindow<EntitySpawnWindow>();
-        LayoutContainer.SetAnchorPreset(_window,LayoutContainer.LayoutPreset.CenterLeft);
+        LayoutContainer.SetAnchorPreset(_window, LayoutContainer.LayoutPreset.CenterLeft);
         _window.OnClose += WindowClosed;
         _window.ReplaceButton.Pressed = _placement.Replacement;
         _window.ReplaceButton.OnToggled += OnEntityReplaceToggled;
@@ -149,7 +151,7 @@ public sealed class EntitySpawningUIController : UIController
         {
             var newObjInfo = new PlacementInformation
             {
-                PlacementOption = EntitySpawnWindow.InitOpts[args.Id],
+                PlacementOption = _placement.AllModeNames[args.Id],
                 EntityType = _placement.CurrentPermission!.EntityType,
                 Range = 2,
                 IsTile = _placement.CurrentPermission.IsTile
@@ -193,6 +195,9 @@ public sealed class EntitySpawningUIController : UIController
         _window.SelectedButton = null;
         searchStr = searchStr?.ToLowerInvariant();
 
+        var categoryFilter = _cfg.GetCVar(CVars.EntitiesCategoryFilter);
+        _prototypes.TryIndex<EntityCategoryPrototype>(categoryFilter, out var filter);
+
         foreach (var prototype in _prototypes.EnumeratePrototypes<EntityPrototype>())
         {
             if (prototype.Abstract)
@@ -205,6 +210,11 @@ public sealed class EntitySpawningUIController : UIController
                 continue;
             }
 
+            if (filter is not null && !prototype.Categories.Contains(filter))
+            {
+                continue;
+            }
+
             if (searchStr != null && !DoesEntityMatchSearch(prototype, searchStr))
             {
                 continue;
@@ -213,11 +223,12 @@ public sealed class EntitySpawningUIController : UIController
             _shownEntities.Add(prototype);
         }
 
-        _shownEntities.Sort((a, b) => {
-                var namesComparation = string.Compare(a.Name, b.Name, StringComparison.Ordinal);
-                if (namesComparation == 0)
-                    return string.Compare(a.EditorSuffix, b.EditorSuffix, StringComparison.Ordinal);
-                return namesComparation;
+        _shownEntities.Sort((a, b) =>
+        {
+            var namesComparation = string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+            if (namesComparation == 0)
+                return string.Compare(a.EditorSuffix, b.EditorSuffix, StringComparison.Ordinal);
+            return namesComparation;
         });
 
         _window.PrototypeList.TotalItemCount = _shownEntities.Count;
@@ -268,7 +279,7 @@ public sealed class EntitySpawningUIController : UIController
         // Calculate index of first prototype to render based on current scroll.
         var height = _window.MeasureButton.DesiredSize.Y + PrototypeListContainer.Separation;
         var offset = Math.Max(-_window.PrototypeList.Position.Y, 0);
-        var startIndex = (int) Math.Floor(offset / height);
+        var startIndex = (int)Math.Floor(offset / height);
         _window.PrototypeList.ItemOffset = startIndex;
 
         var (prevStart, prevEnd) = _lastEntityIndices;
@@ -296,7 +307,7 @@ public sealed class EntitySpawningUIController : UIController
         // Delete buttons at the start of the list that are no longer visible (scrolling down).
         for (var i = prevStart; i < startIndex && i <= prevEnd; i++)
         {
-            var control = (EntitySpawnButton) _window.PrototypeList.GetChild(0);
+            var control = (EntitySpawnButton)_window.PrototypeList.GetChild(0);
             DebugTools.Assert(control.Index == i);
             _window.PrototypeList.RemoveChild(control);
         }
@@ -304,7 +315,7 @@ public sealed class EntitySpawningUIController : UIController
         // Delete buttons at the end of the list that are no longer visible (scrolling up).
         for (var i = prevEnd; i > endIndex && i >= prevStart; i--)
         {
-            var control = (EntitySpawnButton) _window.PrototypeList.GetChild(_window.PrototypeList.ChildCount - 1);
+            var control = (EntitySpawnButton)_window.PrototypeList.GetChild(_window.PrototypeList.ChildCount - 1);
             DebugTools.Assert(control.Index == i);
             _window.PrototypeList.RemoveChild(control);
         }
@@ -337,7 +348,7 @@ public sealed class EntitySpawningUIController : UIController
         if (_window == null || _window.Disposed)
             return;
 
-        var item = (EntitySpawnButton) args.Button.Parent!;
+        var item = (EntitySpawnButton)args.Button.Parent!;
         if (_window.SelectedButton == item)
         {
             _window.SelectedButton = null;
@@ -354,10 +365,11 @@ public sealed class EntitySpawningUIController : UIController
         _window.SelectedButton = null;
         _window.SelectedPrototype = null;
 
-        var overrideMode = EntitySpawnWindow.InitOpts[_window.OverrideMenu.SelectedId];
+
+        var overrideMode = _placement.AllModeNames[_window.OverrideMenu.SelectedId];
         var newObjInfo = new PlacementInformation
         {
-            PlacementOption = overrideMode != "Default" ? overrideMode : item.Prototype.PlacementMode,
+            PlacementOption = overrideMode != IPlacementManager.DefaultModeName ? overrideMode : item.Prototype.PlacementMode,
             EntityType = item.PrototypeID,
             Range = 2,
             IsTile = false

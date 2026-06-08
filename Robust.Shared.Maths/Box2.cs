@@ -43,7 +43,7 @@ namespace Robust.Shared.Maths
         [FieldOffset(sizeof(float) * 2)] public Vector2 TopRight;
 
         [NonSerialized]
-        [FieldOffset(sizeof(float) * 0)] public System.Numerics.Vector4 AsVector4;
+        [FieldOffset(sizeof(float) * 0)] public Vector4 AsVector4;
 
         public readonly Vector2 BottomRight
         {
@@ -87,7 +87,7 @@ namespace Robust.Shared.Maths
         public readonly Vector2 Center
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BottomLeft + Size * .5f;
+            get => (BottomLeft + TopRight) * .5f;
         }
 
         public readonly Vector2 Extents
@@ -210,6 +210,48 @@ namespace Robust.Shared.Maths
             var surfaceIntersect = Area(Intersect(other));
 
             return surfaceIntersect / (Area(this) + Area(other) - surfaceIntersect);
+        }
+
+        public readonly bool IsValid()
+        {
+            var d = Vector2.Subtract(TopRight, BottomLeft);
+            bool valid = d.X >= 0.0f && d.Y >= 0.0f;
+            valid = valid && BottomLeft.IsValid() && TopRight.IsValid();
+            return valid;
+        }
+
+        /// <summary>
+        /// Enlarges this box to contain another box.
+        /// </summary>
+        public bool EnlargeAabb(Box2 other)
+        {
+            var changed = false;
+
+            if (other.Left < Left)
+            {
+                Left = other.Left;
+                changed = true;
+            }
+
+            if (other.Bottom < Bottom)
+            {
+                Bottom = other.Bottom;
+                changed = true;
+            }
+
+            if (Right < other.Right)
+            {
+                Right = other.Right;
+                changed = true;
+            }
+
+            if (other.Top < Top)
+            {
+                Top = other.Top;
+                changed = true;
+            }
+
+            return changed;
         }
 
         /// <summary>
@@ -403,6 +445,15 @@ namespace Robust.Shared.Maths
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
+        public static Box2 Union(Box2 a, Box2 b)
+        {
+            return new Box2(
+                Vector2.Min(a.BottomLeft, b.BottomLeft),
+                Vector2.Max(a.TopRight, b.TopRight));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [Pure]
         public static Box2 Union(in Vector2 a, in Vector2 b)
         {
             var vecA = new Vector2(a.X, a.Y);
@@ -444,7 +495,7 @@ namespace Robust.Shared.Maths
             return new Vector2(cx, cy);
         }
 
-        public bool EqualsApprox(Box2 other)
+        public readonly bool EqualsApprox(Box2 other)
         {
             return MathHelper.CloseToPercent(Left, other.Left)
                    && MathHelper.CloseToPercent(Bottom, other.Bottom)
@@ -452,7 +503,7 @@ namespace Robust.Shared.Maths
                    && MathHelper.CloseToPercent(Top, other.Top);
         }
 
-        public bool EqualsApprox(Box2 other, double tolerance)
+        public readonly bool EqualsApprox(Box2 other, double tolerance)
         {
             return MathHelper.CloseToPercent(Left, other.Left, tolerance)
                    && MathHelper.CloseToPercent(Bottom, other.Bottom, tolerance)

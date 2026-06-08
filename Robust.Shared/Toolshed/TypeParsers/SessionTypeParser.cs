@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Threading.Tasks;
 using Robust.Shared.Console;
 using Robust.Shared.IoC;
 using Robust.Shared.Localization;
@@ -15,20 +14,19 @@ namespace Robust.Shared.Toolshed.TypeParsers;
 /// <summary>
 /// Parse a username to an <see cref="ICommonSession"/>
 /// </summary>
-internal sealed class SessionTypeParser : TypeParser<ICommonSession>
+internal sealed partial class SessionTypeParser : TypeParser<ICommonSession>
 {
     [Dependency] private ISharedPlayerManager _player = default!;
 
-    public override bool TryParse(ParserContext parser, [NotNullWhen(true)] out object? result, out IConError? error)
+    public override bool TryParse(ParserContext ctx, [NotNullWhen(true)] out ICommonSession? result)
     {
-        var start = parser.Index;
-        var word = parser.GetWord();
-        error = null;
+        var start = ctx.Index;
+        var word = ctx.GetWord();
         result = null;
 
         if (word == null)
         {
-            error = new OutOfInputError();
+            ctx.Error = new OutOfInputError();
             return false;
         }
 
@@ -38,23 +36,22 @@ internal sealed class SessionTypeParser : TypeParser<ICommonSession>
             return true;
         }
 
-        error = new InvalidUsername(Loc, word);
-        error.Contextualize(parser.Input, (start, parser.Index));
+        ctx.Error = new InvalidUsername(Loc, word);
+        ctx.Error.Contextualize(ctx.Input, (start, ctx.Index));
         return false;
     }
 
-    public override async ValueTask<(CompletionResult? result, IConError? error)> TryAutocomplete(ParserContext parserContext,
-        string? argName)
+    public override CompletionResult TryAutocomplete(ParserContext parserContext, CommandArgument? arg)
     {
         var opts = CompletionHelper.SessionNames(true, _player);
-        return (CompletionResult.FromHintOptions(opts, "<player session>"), null);
+        return CompletionResult.FromHintOptions(opts, GetArgHint(arg));
     }
 
     public record InvalidUsername(ILocalizationManager Loc, string Username) : IConError
     {
         public FormattedMessage DescribeInner()
         {
-            return FormattedMessage.FromMarkup(Loc.GetString("cmd-parse-failure-session", ("username", Username)));
+            return FormattedMessage.FromUnformatted(Loc.GetString("cmd-parse-failure-session", ("username", Username)));
         }
 
         public string? Expression { get; set; }

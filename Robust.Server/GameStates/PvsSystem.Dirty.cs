@@ -14,7 +14,7 @@ namespace Robust.Server.GameStates
     /// </summary>
     internal sealed partial class PvsSystem
     {
-        [Dependency] private readonly IGameTiming _gameTiming = default!;
+        [Dependency] private IGameTiming _gameTiming = default!;
 
         /// <summary>
         /// if it's a new entity we need to GetEntityState from tick 0.
@@ -49,7 +49,7 @@ namespace Robust.Server.GameStates
 
         private void OnEntityDirty(Entity<MetaDataComponent> uid)
         {
-            if (uid.Comp.PvsData != default)
+            if (uid.Comp.PvsData != PvsIndex.Invalid)
             {
                 ref var meta = ref _metadataMemory.GetRef(uid.Comp.PvsData.Index);
                 meta.LastModifiedTick = uid.Comp.EntityLastModifiedTick;

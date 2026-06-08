@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Robust.Client.Audio;
@@ -26,6 +26,7 @@ namespace Robust.Client.UserInterface.Controls
         private bool _enableAllKeybinds;
         private ButtonGroup? _group;
         private bool _toggleMode;
+        private bool _muteSounds;
 
         /// <summary>
         ///     Specifies the group this button belongs to.
@@ -89,6 +90,7 @@ namespace Robust.Client.UserInterface.Controls
 
                 if (old != value)
                 {
+                    DefaultCursorShape = Disabled ? CursorShape.NotAllowed : CursorShape.Pointer;
                     DrawModeChanged();
                 }
             }
@@ -115,7 +117,7 @@ namespace Robust.Client.UserInterface.Controls
 
                 _pressed = value;
 
-                if (Group != null)
+                if (Group != null && _pressed)
                 {
                     UnsetOtherGroupButtons();
                 }
@@ -135,7 +137,8 @@ namespace Robust.Client.UserInterface.Controls
             if (Pressed != value)
                 return;
 
-            UserInterfaceManager.ClickSound();
+            if (!MuteSounds)
+                UserInterfaceManager.ClickSound();
         }
 
         /// <summary>
@@ -200,6 +203,16 @@ namespace Robust.Client.UserInterface.Controls
         }
 
         /// <summary>
+        ///     If <c>true</c>, this button will not emit sounds when the mouse is pressed or hovered over.
+        /// </summary>
+        [ViewVariables]
+        public bool MuteSounds
+        {
+            get => _muteSounds;
+            set => _muteSounds = value;
+        }
+
+        /// <summary>
         ///     Fired when the button is pushed down by the mouse.
         /// </summary>
         public event Action<ButtonEventArgs>? OnButtonDown;
@@ -222,6 +235,7 @@ namespace Robust.Client.UserInterface.Controls
         protected BaseButton()
         {
             MouseFilter = MouseFilterMode.Stop;
+            DefaultCursorShape = Disabled ? CursorShape.NotAllowed : CursorShape.Pointer;
         }
 
         protected virtual void DrawModeChanged()
@@ -298,14 +312,18 @@ namespace Robust.Client.UserInterface.Controls
                     }
                     else
                     {
-                        UserInterfaceManager.ClickSound();
+                        if (!MuteSounds)
+                            UserInterfaceManager.ClickSound();
                     }
 
                     OnPressed?.Invoke(buttonEventArgs);
                     if (args.Function == EngineKeyFunctions.UIClick && ToggleMode)
                     {
                         OnToggled?.Invoke(new ButtonToggledEventArgs(Pressed, this, args));
-                        UnsetOtherGroupButtons();
+                        if (_pressed)
+                        {
+                            UnsetOtherGroupButtons();
+                        }
                     }
                 }
             }
@@ -353,7 +371,7 @@ namespace Robust.Client.UserInterface.Controls
         {
             base.MouseEntered();
 
-            if (!Disabled)
+            if (!Disabled && !MuteSounds)
             {
                 UserInterfaceManager.HoverSound();
             }

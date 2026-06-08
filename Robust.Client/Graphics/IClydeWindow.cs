@@ -2,19 +2,21 @@
 using System.Numerics;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
+using SDL3;
 
 namespace Robust.Client.Graphics
 {
     /// <summary>
     ///     Represents a single operating system window.
     /// </summary>
+    [NotContentImplementable]
     public interface IClydeWindow : IDisposable
     {
         bool IsDisposed { get; }
         WindowId Id { get; }
         IRenderTarget RenderTarget { get; }
         string Title { get; set; }
-        Vector2i Size { get; }
+        Vector2i Size { get; set; }
         bool IsFocused { get; }
         bool IsMinimized { get; }
         bool IsVisible { get; set; }
@@ -41,9 +43,45 @@ namespace Robust.Client.Graphics
         /// Raised when the window has been resized.
         /// </summary>
         event Action<WindowResizedEventArgs> Resized;
+
+        internal void SetWindowProgress(WindowProgressState state, float value);
+
+        /// <summary>
+        /// Set the active text input area in window pixel coordinates.
+        /// </summary>
+        /// <param name="rect">
+        /// This information is used by the OS to position overlays like IMEs or emoji pickers etc.
+        /// </param>
+        void TextInputSetRect(UIBox2i rect, int cursor);
+
+        /// <summary>
+        /// Indicate that the game should start accepting text input on the currently focused window.
+        /// </summary>
+        /// <remarks>
+        /// On some platforms, this will cause an on-screen keyboard to appear.
+        /// The game will also start accepting IME input if configured by the user.
+        /// </remarks>
+        /// <seealso cref="TextInputStop"/>
+        void TextInputStart();
+
+        /// <summary>
+        /// Stop text input, opposite of <see cref="TextInputStart"/>.
+        /// </summary>
+        /// <seealso cref="TextInputStart"/>
+        void TextInputStop();
     }
 
-    public interface IClydeWindowInternal : IClydeWindow
+    internal enum WindowProgressState : byte
+    {
+        None = SDL.SDL_ProgressState.SDL_PROGRESS_STATE_NONE,
+        Indeterminate = SDL.SDL_ProgressState.SDL_PROGRESS_STATE_INDETERMINATE,
+        Normal = SDL.SDL_ProgressState.SDL_PROGRESS_STATE_NORMAL,
+        Paused = SDL.SDL_ProgressState.SDL_PROGRESS_STATE_PAUSED,
+        Error = SDL.SDL_ProgressState.SDL_PROGRESS_STATE_ERROR
+    }
+
+    [NotContentImplementable]
+    internal interface IClydeWindowInternal : IClydeWindow
     {
         nint? WindowsHWnd { get; }
     }

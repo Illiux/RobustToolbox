@@ -9,11 +9,13 @@ namespace Robust.Shared.GameObjects
     /// <summary>
     ///     An abstract class to override to implement bound user interfaces.
     /// </summary>
-    public abstract class BoundUserInterface : IDisposable
+    public abstract partial class BoundUserInterface : IDisposable
     {
-        [Dependency] protected readonly IEntityManager EntMan = default!;
-        [Dependency] private readonly ISharedPlayerManager _playerManager = default!;
+        [Dependency] protected internal IEntityManager EntMan = default!;
+        [Dependency] protected ISharedPlayerManager PlayerManager = default!;
         protected readonly SharedUserInterfaceSystem UiSystem;
+
+        public bool IsOpened { get; protected set; }
 
         public readonly Enum UiKey;
         public EntityUid Owner { get; }
@@ -30,7 +32,8 @@ namespace Robust.Shared.GameObjects
 
         protected BoundUserInterface(EntityUid owner, Enum uiKey)
         {
-            IoCManager.InjectDependencies(this);
+            IoCManager.Resolve(ref EntMan);
+            EntMan.EntitySysManager.DependencyCollection.InjectDependencies(this);
             UiSystem = EntMan.System<SharedUserInterfaceSystem>();
 
             Owner = owner;
@@ -41,8 +44,13 @@ namespace Robust.Shared.GameObjects
         ///     Invoked when the UI is opened.
         ///     Do all creation and opening of things like windows in here.
         /// </summary>
+        [MustCallBase]
         protected internal virtual void Open()
         {
+            if (IsOpened)
+                return;
+
+            IsOpened = true;
         }
 
         /// <summary>
@@ -50,6 +58,27 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         protected internal virtual void UpdateState(BoundUserInterfaceState state)
         {
+        }
+
+        /// <summary>
+        /// Calls <see cref="UpdateState"/> if the supplied state exists and calls <see cref="Update"/>
+        /// </summary>
+        public void Update<T>() where T : BoundUserInterfaceState
+        {
+            if (UiSystem.TryGetUiState<T>(Owner, UiKey, out var state))
+            {
+                UpdateState(state);
+            }
+
+            Update();
+        }
+
+        /// <summary>
+        /// Generic update method called whenever the BUI should update.
+        /// </summary>
+        public virtual void Update()
+        {
+
         }
 
         /// <summary>
@@ -72,7 +101,11 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         public void Close()
         {
-            UiSystem.CloseUi(Owner, UiKey, _playerManager.LocalEntity, predicted: true);
+            if (!IsOpened)
+                return;
+
+            IsOpened = false;
+            UiSystem.CloseUi(Owner, UiKey, PlayerManager.LocalEntity, predicted: true);
         }
 
         /// <summary>

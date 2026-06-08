@@ -49,6 +49,7 @@ namespace Robust.Shared.GameObjects
     /// </remarks>
     /// <seealso cref="IComponentRegistration" />
     /// <seealso cref="IComponent" />
+    [NotContentImplementable]
     public interface IComponentFactory
     {
         event Action<ComponentRegistration[]> ComponentsAdded;
@@ -76,6 +77,10 @@ namespace Robust.Shared.GameObjects
         /// <param name="ignoreCase">Whether or not to ignore casing on <see cref="componentName"/></param>
         /// <returns>The availability of the component.</returns>
         ComponentAvailability GetComponentAvailability(string componentName, bool ignoreCase = false);
+
+        public void RegisterNetworkedFields<T>(params string[] fields) where T : IComponent;
+
+        public void RegisterNetworkedFields(ComponentRegistration compReg, params string[] fields);
 
         /// <summary>
         /// Slow-path for Type -> CompIdx mapping without generics.
@@ -111,6 +116,8 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         /// <param name="postfix">If provided, will only ignore components ending with the postfix.</param>
         void IgnoreMissingComponents(string postfix = "");
+
+        IComponent GetComponent(EntityPrototype.ComponentRegistryEntry entry);
 
         /// <summary>
         /// Gets a new component instantiated of the specified type.

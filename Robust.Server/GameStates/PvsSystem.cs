@@ -14,6 +14,7 @@ using Robust.Server.Replays;
 using Robust.Shared;
 using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
+using Robust.Shared.GameStates;
 using Robust.Shared.Map;
 using Robust.Shared.Network;
 using Robust.Shared.Player;
@@ -26,19 +27,19 @@ namespace Robust.Server.GameStates;
 
 internal sealed partial class PvsSystem : EntitySystem
 {
-    [Dependency] private readonly IConfigurationManager _configManager = default!;
-    [Dependency] private readonly INetworkedMapManager _mapManager = default!;
-    [Dependency] private readonly IServerEntityNetworkManager _netEntMan = default!;
-    [Dependency] private readonly IPlayerManager _playerManager = default!;
-    [Dependency] private readonly IParallelManager _parallelManager = default!;
-    [Dependency] private readonly IServerGameStateManager _serverGameStateManager = default!;
-    [Dependency] private readonly IServerNetConfigurationManager _netConfigManager = default!;
-    [Dependency] private readonly SharedTransformSystem _transform = default!;
-    [Dependency] private readonly InputSystem _input = default!;
-    [Dependency] private readonly IServerNetManager _netMan = default!;
-    [Dependency] private readonly IParallelManagerInternal _parallelMgr = default!;
-    [Dependency] private readonly PvsOverrideSystem _pvsOverride = default!;
-    [Dependency] private readonly IServerReplayRecordingManager _replay = default!;
+    [Dependency] private IConfigurationManager _configManager = default!;
+    [Dependency] private INetworkedMapManager _mapManager = default!;
+    [Dependency] private IServerEntityNetworkManager _netEntMan = default!;
+    [Dependency] private IPlayerManager _playerManager = default!;
+    [Dependency] private IParallelManager _parallelManager = default!;
+    [Dependency] private IServerGameStateManager _serverGameStateManager = default!;
+    [Dependency] private IServerNetConfigurationManager _netConfigManager = default!;
+    [Dependency] private SharedTransformSystem _transform = default!;
+    [Dependency] private InputSystem _input = default!;
+    [Dependency] private IServerNetManager _netMan = default!;
+    [Dependency] private IParallelManagerInternal _parallelMgr = default!;
+    [Dependency] private PvsOverrideSystem _pvsOverride = default!;
+    [Dependency] private IServerReplayRecordingManager _replay = default!;
 
     // TODO make this a cvar. Make it in terms of seconds and tie it to tick rate?
     // Main issue is that I CBF figuring out the logic for handling it changing mid-game.
@@ -94,6 +95,8 @@ internal sealed partial class PvsSystem : EntitySystem
     /// </summary>
     private readonly List<GameTick> _deletedTick = new();
 
+    private readonly HashSet<EntityUid> _toDelete = new();
+
     /// <summary>
     /// The sessions that are currently being processed. Note that this is in general used by parallel & async tasks.
     /// Hence player disconnection processing is deferred and only run via <see cref="ProcessDisconnections"/>.
@@ -103,6 +106,7 @@ internal sealed partial class PvsSystem : EntitySystem
     private bool _async;
 
     private DefaultObjectPool<PvsThreadResources> _threadResourcesPool = default!;
+    private EntityEventBus.DirectedEventHandler?[]? _getStateHandlers;
 
     private static readonly Histogram Histogram = Metrics.CreateHistogram("robust_game_state_update_usage",
         "Amount of time spent processing different parts of the game state update", new HistogramConfiguration
@@ -127,9 +131,8 @@ internal sealed partial class PvsSystem : EntitySystem
         _metaQuery = GetEntityQuery<MetaDataComponent>();
         _xformQuery = GetEntityQuery<TransformComponent>();
 
-        SubscribeLocalEvent<MapChangedEvent>(OnMapChanged);
+        SubscribeLocalEvent<MapRemovedEvent>(OnMapChanged);
         SubscribeLocalEvent<GridRemovalEvent>(OnGridRemoved);
-        SubscribeLocalEvent<EntityTerminatingEvent>(OnEntityTerminating);
         SubscribeLocalEvent<TransformComponent, TransformStartupEvent>(OnTransformStartup);
 
         _playerManager.PlayerStatusChanged += OnPlayerStatusChanged;
@@ -137,6 +140,7 @@ internal sealed partial class PvsSystem : EntitySystem
         EntityManager.EntityAdded += OnEntityAdded;
         EntityManager.EntityDeleted += OnEntityDeleted;
         EntityManager.AfterEntityFlush += AfterEntityFlush;
+        EntityManager.BeforeEntityTerminating += OnEntityTerminating;
 
         Subs.CVar(_configManager, CVars.NetPVS, SetPvs, true);
         Subs.CVar(_configManager, CVars.NetMaxUpdateRange, OnViewsizeChanged, true);
@@ -162,6 +166,7 @@ internal sealed partial class PvsSystem : EntitySystem
         EntityManager.EntityAdded -= OnEntityAdded;
         EntityManager.EntityDeleted -= OnEntityDeleted;
         EntityManager.AfterEntityFlush -= AfterEntityFlush;
+        EntityManager.BeforeEntityTerminating -= OnEntityTerminating;
 
         _parallelMgr.ParallelCountChanged -= ResetParallelism;
 
@@ -170,6 +175,7 @@ internal sealed partial class PvsSystem : EntitySystem
 
         ClearPvsData();
         ShutdownDirty();
+        _getStateHandlers = null;
     }
 
     public override void Update(float frameTime)
@@ -182,6 +188,8 @@ internal sealed partial class PvsSystem : EntitySystem
     /// </summary>
     internal void SendGameStates(ICommonSession[] players)
     {
+        _getStateHandlers ??= EntityManager.EventBusInternal.GetNetCompEventHandlers<ComponentGetState>();
+
         // Wait for pending jobs and process disconnected players
         ProcessDisconnections();
 
@@ -193,6 +201,12 @@ internal sealed partial class PvsSystem : EntitySystem
 
         // Construct & serialize the game state for each player (and for the replay).
         SerializeStates();
+
+        foreach (var uid in _toDelete)
+        {
+            QueueDel(uid);
+        }
+        _toDelete.Clear();
 
         // Compress & send the states.
         SendStates();
@@ -301,7 +315,9 @@ internal sealed partial class PvsSystem : EntitySystem
         // Process all entities in visible PVS chunks
         AddPvsChunks(session);
 
+#if DEBUG
         VerifySessionData(session);
+#endif
 
         var toSend = session.ToSend!;
         session.ToSend = null;
@@ -331,11 +347,12 @@ internal sealed partial class PvsSystem : EntitySystem
         session.Overflow = oldEntry.Value;
     }
 
-    [Conditional("DEBUG")]
+#if DEBUG
     private void VerifySessionData(PvsSession pvsSession)
     {
-        var toSend = pvsSession.ToSend;
-        var toSendSet = new HashSet<NetEntity>(toSend!.Count);
+        var toSend = pvsSession.ToSend!;
+        var toSendSet = pvsSession.ToSendSet;
+        toSendSet.Clear();
 
         foreach (var intPtr in toSend)
         {
@@ -359,6 +376,7 @@ internal sealed partial class PvsSystem : EntitySystem
                               || data.LastSeen == _gameTiming.CurTick - 1);
         }
     }
+#endif
 
     private (Vector2 worldPos, float range, EntityUid? map) CalcViewBounds(Entity<TransformComponent, EyeComponent?> eye)
     {
@@ -460,18 +478,27 @@ internal sealed partial class PvsSystem : EntitySystem
 }
 
 [ByRefEvent]
-public struct ExpandPvsEvent(ICommonSession session)
+public struct ExpandPvsEvent(ICommonSession session, int mask)
 {
     public readonly ICommonSession Session = session;
 
     /// <summary>
-    /// List of entities that will get added to this session's PVS set.
+    /// List of entities that will get added to this session's PVS set. This will still respect visibility masks.
     /// </summary>
     public List<EntityUid>? Entities;
 
     /// <summary>
     /// List of entities that will get added to this session's PVS set. Unlike <see cref="Entities"/> this will also
-    /// recursively add all children of the given entity.
+    /// recursively add all children of the given entity. This will still respect visibility masks.
     /// </summary>
     public List<EntityUid>? RecursiveEntities;
+
+    /// <summary>
+    /// Visibility mask to use when adding entities. Defaults to the usual visibility mask for that client.
+    /// </summary>
+    /// <remarks>
+    /// Note that this mask will affect all global & session overrides from <see cref="PvsOverrideSystem"/> for this
+    /// client, not just the entities in <see cref="Entities"/> and <see cref="RecursiveEntities"/>.
+    /// </remarks>
+    public int VisMask = mask;
 }

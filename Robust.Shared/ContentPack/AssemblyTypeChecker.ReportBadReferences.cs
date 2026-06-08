@@ -14,12 +14,9 @@ namespace Robust.Shared.ContentPack;
 internal sealed partial class AssemblyTypeChecker
 {
     // This part of the code tries to find the originator of bad sandbox references.
-
-    private void ReportBadReferences(PEReader peReader, MetadataReader reader, IEnumerable<EntityHandle> reference)
+    private IEnumerable<(EntityHandle Referenced, MethodDefinitionHandle SourceMethod, int InstructionOffset)> FindReference(PEReader peReader, MetadataReader reader, params IEnumerable<EntityHandle> handles)
     {
-        _sawmill.Info("Started search for originator of bad references...");
-
-        var refs = reference.ToHashSet();
+        var refs = handles.ToHashSet();
         ExpandReferences(reader, refs);
 
         foreach (var methodDefHandle in reader.MethodDefinitions)
@@ -27,8 +24,6 @@ internal sealed partial class AssemblyTypeChecker
             var methodDef = reader.GetMethodDefinition(methodDefHandle);
             if (methodDef.RelativeVirtualAddress == 0)
                 continue;
-
-            var methodName = reader.GetString(methodDef.Name);
 
             var body = peReader.GetMethodBody(methodDef.RelativeVirtualAddress);
             var bytes = body.GetILBytes()!;
@@ -39,11 +34,9 @@ internal sealed partial class AssemblyTypeChecker
             {
                 if (instruction.TryGetEntityHandle(out var handle))
                 {
-                    if (refs.Contains(handle))
+                    if (refs.Overlaps(ExpandHandle(reader, handle)))
                     {
-                        var type = GetTypeFromDefinition(reader, methodDef.GetDeclaringType());
-                        _sawmill.Error(
-                            $"Found reference to {DisplayHandle(reader, handle)} in method {type}.{methodName} at IL 0x{prefPosition:X4}");
+                        yield return (handle, methodDefHandle, prefPosition);
                     }
                 }
 
@@ -52,10 +45,29 @@ internal sealed partial class AssemblyTypeChecker
         }
     }
 
+    private void ReportBadReferences(PEReader peReader, MetadataReader reader, IEnumerable<EntityHandle> reference)
+    {
+        foreach (var (referenced, method, ilOffset) in FindReference(peReader, reader, reference))
+        {
+            var methodDef = reader.GetMethodDefinition(method);
+            var methodName = reader.GetString(methodDef.Name);
+
+            var type = GetTypeFromDefinition(reader, methodDef.GetDeclaringType());
+            _sawmill.Error(
+                $"Found reference to {DisplayHandle(reader, referenced)} in method {type}.{methodName} at IL 0x{ilOffset:X4}");
+        }
+    }
+
     private static string DisplayHandle(MetadataReader reader, EntityHandle handle)
     {
         switch (handle.Kind)
         {
+            case HandleKind.MethodSpecification:
+                var methodSpec = reader.GetMethodSpecification((MethodSpecificationHandle)handle);
+                var methodProvider = new TypeProvider();
+                var spec = methodSpec.DecodeSignature(methodProvider, 0);
+                return $"{DisplayHandle(reader, methodSpec.Method)}<{string.Join(", ", spec.Select(t => t.ToString()))}>";
+
             case HandleKind.MemberReference:
                 var memberRef = reader.GetMemberReference((MemberReferenceHandle)handle);
                 var name = reader.GetString(memberRef.Name);
@@ -90,6 +102,17 @@ internal sealed partial class AssemblyTypeChecker
         }
 
         handles.UnionWith(toAdd);
+    }
+
+    private static IEnumerable<EntityHandle> ExpandHandle(MetadataReader reader, EntityHandle handle)
+    {
+        // Annoying, S.R.M gives no way to iterate over the MethodSpec table.
+        // This means the only way to correlate MethodSpec references is to do it for each handle.
+
+        yield return handle;
+
+        if (handle.Kind == HandleKind.MethodSpecification)
+            yield return reader.GetMethodSpecification((MethodSpecificationHandle)handle).Method;
     }
 
     private readonly struct ILInstruction

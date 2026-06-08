@@ -11,10 +11,10 @@ using Robust.Shared.Serialization.Manager;
 namespace Robust.Client.GameObjects
 {
     [UsedImplicitly]
-    public sealed class AppearanceSystem : SharedAppearanceSystem
+    public sealed partial class AppearanceSystem : SharedAppearanceSystem
     {
         private readonly Queue<(EntityUid uid, AppearanceComponent)> _queuedUpdates = new();
-        [Dependency] private readonly ISerializationManager _serialization = default!;
+        [Dependency] private ISerializationManager _serialization = default!;
 
         public override void Initialize()
         {
@@ -26,6 +26,8 @@ namespace Robust.Client.GameObjects
 
         protected override void OnAppearanceGetState(EntityUid uid, AppearanceComponent component, ref ComponentGetState args)
         {
+            // TODO Game State
+            // Force the client to serialize & de-serialize implicitly generated component states.
             var clone = CloneAppearanceData(component.AppearanceData);
             args.State = new AppearanceComponentState(clone);
         }

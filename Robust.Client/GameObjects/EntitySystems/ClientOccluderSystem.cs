@@ -6,6 +6,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Utility;
 using System;
 using System.Collections.Generic;
+using Robust.Shared.IoC;
 using static Robust.Shared.GameObjects.OccluderComponent;
 
 namespace Robust.Client.GameObjects;
@@ -17,9 +18,10 @@ namespace Robust.Client.GameObjects;
 // Whereas the tree stuff is precise.
 // Also I just realized this and I cba to refactor this again.
 [UsedImplicitly]
-internal sealed class ClientOccluderSystem : OccluderSystem
+internal sealed partial class ClientOccluderSystem : OccluderSystem
 {
     private readonly HashSet<EntityUid> _dirtyEntities = new();
+    [Dependency] private SharedMapSystem _mapSystem = default!;
 
     /// <inheritdoc />
     public override void Initialize()
@@ -102,7 +104,8 @@ internal sealed class ClientOccluderSystem : OccluderSystem
 
         if (occluder.Enabled && xform.Anchored && TryComp(xform.GridUid, out grid))
         {
-            pos = grid.TileIndicesFor(xform.Coordinates);
+            gridId = xform.GridUid.Value;
+            pos = _mapSystem.TileIndicesFor(gridId, grid, xform.Coordinates);
             _dirtyEntities.Add(sender);
         }
         else if (occluder.LastPosition != null)
@@ -117,10 +120,10 @@ internal sealed class ClientOccluderSystem : OccluderSystem
             return;
         }
 
-        DirtyNeighbours(grid.GetAnchoredEntitiesEnumerator(pos + new Vector2i(0, 1)), query);
-        DirtyNeighbours(grid.GetAnchoredEntitiesEnumerator(pos + new Vector2i(0, -1)), query);
-        DirtyNeighbours(grid.GetAnchoredEntitiesEnumerator(pos + new Vector2i(1, 0)), query);
-        DirtyNeighbours(grid.GetAnchoredEntitiesEnumerator(pos + new Vector2i(-1, 0)), query);
+        DirtyNeighbours(_mapSystem.GetAnchoredEntitiesEnumerator(gridId, grid, pos + new Vector2i(0, 1)), query);
+        DirtyNeighbours(_mapSystem.GetAnchoredEntitiesEnumerator(gridId, grid, pos + new Vector2i(0, -1)), query);
+        DirtyNeighbours(_mapSystem.GetAnchoredEntitiesEnumerator(gridId, grid, pos + new Vector2i(1, 0)), query);
+        DirtyNeighbours(_mapSystem.GetAnchoredEntitiesEnumerator(gridId, grid, pos + new Vector2i(-1, 0)), query);
     }
 
     private void DirtyNeighbours(AnchoredEntitiesEnumerator enumerator, EntityQuery<OccluderComponent> occluderQuery)
@@ -166,25 +169,25 @@ internal sealed class ClientOccluderSystem : OccluderSystem
             return;
         }
 
-        var tile = grid.TileIndicesFor(xform.Coordinates);
+        var tile = _mapSystem.TileIndicesFor(xform.GridUid.Value, grid, xform.Coordinates);
 
         // TODO: Sub to parent changes instead or something.
         // DebugTools.Assert(occluder.LastPosition == null
-            // || occluder.LastPosition.Value.Grid == xform.GridUid && occluder.LastPosition.Value.Tile == tile);
+        // || occluder.LastPosition.Value.Grid == xform.GridUid && occluder.LastPosition.Value.Tile == tile);
         occluder.LastPosition = (xform.GridUid.Value, tile);
 
         // dir starts at the relative effective south direction;
         var dir = xform.LocalRotation.GetCardinalDir();
-        CheckDir(dir, OccluderDir.South, tile, occluder, grid, occluders, xforms);
+        CheckDir(dir, OccluderDir.South, tile, occluder, xform.GridUid.Value, grid, occluders, xforms);
 
         dir = dir.GetClockwise90Degrees();
-        CheckDir(dir, OccluderDir.West, tile, occluder, grid, occluders, xforms);
+        CheckDir(dir, OccluderDir.West, tile, occluder, xform.GridUid.Value, grid, occluders, xforms);
 
         dir = dir.GetClockwise90Degrees();
-        CheckDir(dir, OccluderDir.North, tile, occluder, grid, occluders, xforms);
+        CheckDir(dir, OccluderDir.North, tile, occluder, xform.GridUid.Value, grid, occluders, xforms);
 
         dir = dir.GetClockwise90Degrees();
-        CheckDir(dir, OccluderDir.East, tile, occluder, grid, occluders, xforms);
+        CheckDir(dir, OccluderDir.East, tile, occluder, xform.GridUid.Value, grid, occluders, xforms);
     }
 
     private void CheckDir(
@@ -192,6 +195,7 @@ internal sealed class ClientOccluderSystem : OccluderSystem
         OccluderDir occDir,
         Vector2i tile,
         OccluderComponent occluder,
+        EntityUid gridUid,
         MapGridComponent grid,
         EntityQuery<OccluderComponent> query,
         EntityQuery<TransformComponent> xforms)
@@ -199,7 +203,7 @@ internal sealed class ClientOccluderSystem : OccluderSystem
         if ((occluder.Occluding & occDir) != 0)
             return;
 
-        foreach (var neighbor in grid.GetAnchoredEntities(tile.Offset(dir)))
+        foreach (var neighbor in _mapSystem.GetAnchoredEntities(gridUid, grid, tile.Offset(dir)))
         {
             if (!query.TryGetComponent(neighbor, out var otherOccluder) || !otherOccluder.Enabled)
                 continue;

@@ -5,10 +5,12 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using OpenToolkit;
 using OpenToolkit.Graphics.OpenGL4;
+using Robust.Client.GameObjects;
 using Robust.Client.Input;
 using Robust.Client.Map;
 using Robust.Client.ResourceManagement;
 using Robust.Client.UserInterface;
+using Robust.Client.Utility;
 using Robust.Shared;
 using Robust.Shared.Configuration;
 using Robust.Shared.ContentPack;
@@ -20,7 +22,9 @@ using Robust.Shared.Log;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Profiling;
+using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
+using Robust.Shared.Utility;
 using TextureWrapMode = Robust.Shared.Graphics.TextureWrapMode;
 
 namespace Robust.Client.Graphics.Clyde
@@ -30,22 +34,25 @@ namespace Robust.Client.Graphics.Clyde
     /// </summary>
     internal sealed partial class Clyde : IClydeInternal, IPostInjectInit, IEntityEventSubscriber
     {
-        [Dependency] private readonly IClydeTileDefinitionManager _tileDefinitionManager = default!;
-        [Dependency] private readonly IEyeManager _eyeManager = default!;
-        [Dependency] private readonly ILightManager _lightManager = default!;
-        [Dependency] private readonly ILogManager _logManager = default!;
-        [Dependency] private readonly IMapManager _mapManager = default!;
-        [Dependency] private readonly IOverlayManager _overlayManager = default!;
-        [Dependency] private readonly IResourceCache _resourceCache = default!;
-        [Dependency] private readonly IResourceManager _resManager = default!;
-        [Dependency] private readonly IUserInterfaceManagerInternal _userInterfaceManager = default!;
-        [Dependency] private readonly IEntitySystemManager _entitySystemManager = default!;
-        [Dependency] private readonly IGameTiming _gameTiming = default!;
-        [Dependency] private readonly IConfigurationManager _cfg = default!;
-        [Dependency] private readonly ProfManager _prof = default!;
-        [Dependency] private readonly IDependencyCollection _deps = default!;
-        [Dependency] private readonly ILocalizationManager _loc = default!;
-        [Dependency] private readonly IInputManager _inputManager = default!;
+        [Dependency] private IClydeTileDefinitionManager _tileDefinitionManager = default!;
+        [Dependency] private ILightManager _lightManager = default!;
+        [Dependency] private ILogManager _logManager = default!;
+        [Dependency] private IMapManager _mapManager = default!;
+        [Dependency] private IOverlayManager _overlayManager = default!;
+        [Dependency] private IResourceCache _resourceCache = default!;
+        [Dependency] private IResourceManager _resManager = default!;
+        [Dependency] private IUserInterfaceManagerInternal _userInterfaceManager = default!;
+        [Dependency] private IEntitySystemManager _entitySystemManager = default!;
+        [Dependency] private IGameTiming _gameTiming = default!;
+        [Dependency] private IConfigurationManager _cfg = default!;
+        [Dependency] private ProfManager _prof = default!;
+        [Dependency] private IDependencyCollection _deps = default!;
+        [Dependency] private ILocalizationManager _loc = default!;
+        [Dependency] private IInputManager _inputManager = default!;
+        [Dependency] private ClientEntityManager _entityManager = default!;
+        [Dependency] private IPrototypeManager _proto = default!;
+        [Dependency] private IReloadManager _reloads = default!;
+        [Dependency] private LoadingScreenManager _loadingScreenManager = default!;
 
         private GLUniformBuffer<ProjViewMatrices> ProjViewUBO = default!;
         private GLUniformBuffer<UniformConstants> UniformConstantsUBO = default!;
@@ -62,7 +69,7 @@ namespace Robust.Client.Graphics.Clyde
         // VAO is per-window and not stored (not necessary!)
         private GLBuffer WindowVBO = default!;
 
-        private bool _drawingSplash = true;
+        private bool _drawingLoadingScreen = true;
 
         private GLShaderProgram? _currentProgram;
 
@@ -78,10 +85,13 @@ namespace Robust.Client.Graphics.Clyde
 
         private ISawmill _clydeSawmill = default!;
         private ISawmill _sawmillOgl = default!;
+        private ISawmill _sawmillWin = default!;
 
         private IBindingsContext _glBindingsContext = default!;
         private bool _earlyGLInit;
         private bool _threadWindowApi;
+
+        public bool IsInitialized { get; private set; }
 
         public Clyde()
         {
@@ -94,22 +104,37 @@ namespace Robust.Client.Graphics.Clyde
         {
             _clydeSawmill = _logManager.GetSawmill("clyde");
             _sawmillOgl = _logManager.GetSawmill("clyde.ogl");
+            _sawmillWin = _logManager.GetSawmill("clyde.win");
+
+            _reloads.Register("/Shaders", "*.swsl");
+            _reloads.Register("/Textures/Shaders", "*.swsl");
+            _reloads.Register("/Textures", "*.jpg");
+            _reloads.Register("/Textures", "*.jpeg");
+            _reloads.Register("/Textures", "*.png");
+            _reloads.Register("/Textures", "*.webp");
+
+            _reloads.OnChanged += OnChange;
+            _proto.PrototypesReloaded += OnProtoReload;
 
             _cfg.OnValueChanged(CVars.DisplayOGLCheckErrors, b => _checkGLErrors = b, true);
-            _cfg.OnValueChanged(CVars.DisplayVSync, VSyncChanged, true);
             _cfg.OnValueChanged(CVars.DisplayWindowMode, WindowModeChanged, true);
             _cfg.OnValueChanged(CVars.LightResolutionScale, LightResolutionScaleChanged, true);
             _cfg.OnValueChanged(CVars.MaxShadowcastingLights, MaxShadowcastingLightsChanged, true);
             _cfg.OnValueChanged(CVars.LightSoftShadows, SoftShadowsChanged, true);
             _cfg.OnValueChanged(CVars.MaxLightCount, MaxLightsChanged, true);
             _cfg.OnValueChanged(CVars.MaxOccluderCount, MaxOccludersChanged, true);
+            _cfg.OnValueChanged(CVars.RenderTileEdges, RenderTileEdgesChanges, true);
             // I can't be bothered to tear down and set these threads up in a cvar change handler.
 
             // Windows and Linux can be trusted to not explode with threaded windowing,
             // macOS cannot.
             if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
                 _cfg.OverrideDefault(CVars.DisplayThreadWindowApi, true);
-
+#if MACOS
+            // Trust macOS to not need threaded window blitting.
+            // (threaded window blitting is a workaround to avoid having to frequently MakeCurrent() on Windows, as it is broken).
+            _cfg.OverrideDefault(CVars.DisplayThreadWindowBlit, false);
+#endif
             _threadWindowBlit = _cfg.GetCVar(CVars.DisplayThreadWindowBlit);
             _threadWindowApi = _cfg.GetCVar(CVars.DisplayThreadWindowApi);
 
@@ -118,13 +143,49 @@ namespace Robust.Client.Graphics.Clyde
             return InitWindowing();
         }
 
+        private void OnProtoReload(PrototypesReloadedEventArgs obj)
+        {
+            if (!obj.WasModified<ShaderPrototype>())
+                return;
+
+            foreach (var shader in obj.ByType[typeof(ShaderPrototype)].Modified.Keys)
+            {
+                _resourceCache.ReloadResource<ShaderSourceResource>(shader);
+            }
+        }
+
+        private void OnChange(ResPath obj)
+        {
+            if ((obj.TryRelativeTo(new ResPath("/Shaders"), out _) || obj.TryRelativeTo(new ResPath("/Textures/Shaders"), out _)) && obj.Extension == "swsl")
+            {
+                _resourceCache.ReloadResource<ShaderSourceResource>(obj);
+            }
+
+            if (obj.TryRelativeTo(new ResPath("/Textures"), out _) && !obj.TryRelativeTo(new ResPath("/Textures/Tiles"), out _))
+            {
+                if (obj.Extension == "jpg" || obj.Extension == "jpeg" || obj.Extension == "webp")
+                {
+                    _resourceCache.ReloadResource<TextureResource>(obj);
+                }
+
+                if (obj.Extension == "png")
+                {
+                    _resourceCache.ReloadResource<TextureResource>(obj);
+                }
+            }
+        }
+
         public bool InitializePostWindowing()
         {
             _gameThread = Thread.CurrentThread;
 
+            InitSystems();
+
             InitGLContextManager();
             if (!InitMainWindowAndRenderer())
                 return false;
+
+            IsInitialized = true;
 
             return true;
         }
@@ -157,7 +218,7 @@ namespace Robust.Client.Graphics.Clyde
 
         public void Ready()
         {
-            _drawingSplash = false;
+            _drawingLoadingScreen = false;
 
             InitLighting();
         }
@@ -240,7 +301,7 @@ namespace Robust.Client.Graphics.Clyde
                 overrideVersion != null,
                 _windowing!.GetDescription());
 
-            GL.Enable(EnableCap.Blend);
+            IsBlending = true;
             if (_hasGLSrgb && !_isGLES)
             {
                 GL.Enable(EnableCap.FramebufferSrgb);

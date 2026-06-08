@@ -20,17 +20,17 @@ using Robust.Shared.Utility;
 namespace Robust.Client
 {
     /// <inheritdoc />
-    public sealed class BaseClient : IBaseClient, IPostInjectInit
+    public sealed partial class BaseClient : IBaseClient, IPostInjectInit
     {
-        [Dependency] private readonly IClientNetManager _net = default!;
-        [Dependency] private readonly IPlayerManager _playMan = default!;
-        [Dependency] private readonly IClientNetConfigurationManager _configManager = default!;
-        [Dependency] private readonly IClientEntityManager _entityManager = default!;
-        [Dependency] private readonly IMapManager _mapManager = default!;
-        [Dependency] private readonly IDiscordRichPresence _discord = default!;
-        [Dependency] private readonly IGameTiming _timing = default!;
-        [Dependency] private readonly IClientGameStateManager _gameStates = default!;
-        [Dependency] private readonly ILogManager _logMan = default!;
+        [Dependency] private IClientNetManager _net = default!;
+        [Dependency] private IPlayerManager _playMan = default!;
+        [Dependency] private IClientNetConfigurationManager _configManager = default!;
+        [Dependency] private IClientEntityManager _entityManager = default!;
+        [Dependency] private IMapManager _mapManager = default!;
+        [Dependency] private IDiscordRichPresence _discord = default!;
+        [Dependency] private IGameTiming _timing = default!;
+        [Dependency] private IClientGameStateManager _gameStates = default!;
+        [Dependency] private ILogManager _logMan = default!;
 
         /// <inheritdoc />
         public ushort DefaultPort { get; } = 1212;
@@ -61,6 +61,7 @@ namespace Robust.Client
                 NetMessageAccept.Handshake | NetMessageAccept.Client);
 
             _configManager.OnValueChanged(CVars.NetTickrate, TickRateChanged, invokeImmediately: true);
+            _configManager.OnValueChanged(CVars.GameTimeScale, TimeScaleChanged, invokeImmediately: true);
 
             _playMan.Initialize(0);
             _playMan.PlayerListUpdated += OnPlayerListUpdated;
@@ -88,11 +89,23 @@ namespace Robust.Client
         {
             if (GameInfo != null)
             {
-                GameInfo.TickRate = (byte) tickrate;
+                GameInfo.TickRate = (ushort) tickrate;
             }
 
-            _timing.SetTickRateAt((byte) tickrate, info.TickChanged);
+            _timing.SetTickRateAt((ushort) tickrate, info.TickChanged);
             _logger.Info($"Tickrate changed to: {tickrate} on tick {_timing.CurTick}");
+        }
+
+        private void TimeScaleChanged(float timeScale, in CVarChangeInfo info)
+        {
+            if (!GameTiming.IsTimescaleValid(timeScale))
+            {
+                _logger.Error($"Invalid time scale set: {timeScale}, ignoring");
+                return;
+            }
+
+            _timing.TimeScale = timeScale;
+            _logger.Info($"Tickrate changed to: {timeScale} on tick {_timing.CurTick}");
         }
 
         /// <inheritdoc />
@@ -115,10 +128,6 @@ namespace Robust.Client
         /// <inheritdoc />
         public void DisconnectFromServer(string reason)
         {
-            DebugTools.Assert(RunLevel > ClientRunLevel.Initialize);
-            DebugTools.Assert(_net.IsConnected);
-            // run level changed in OnNetDisconnect()
-            // are both of these *really* needed?
             _net.ClientDisconnect(reason);
         }
 
@@ -395,6 +404,6 @@ namespace Robust.Client
         /// </summary>
         public int ServerMaxPlayers { get; set; }
 
-        public byte TickRate { get; internal set; }
+        public uint TickRate { get; internal set; }
     }
 }

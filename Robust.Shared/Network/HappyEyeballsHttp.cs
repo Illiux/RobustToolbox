@@ -156,7 +156,7 @@ internal static class HappyEyeballsHttp
         }
         else if (ipv6.Length > ipv4.Length)
         {
-            ipv4.AsSpan(commonLength).CopyTo(result.AsSpan(commonLength * 2));
+            ipv6.AsSpan(commonLength).CopyTo(result.AsSpan(commonLength * 2));
         }
 
         return result;
@@ -241,6 +241,16 @@ internal static class HappyEyeballsHttp
             // We didn't get a single successful connection. Well heck.
             throw new AggregateException(
                 allTasks.Where(x => x.IsFaulted).SelectMany(x => x.Exception!.InnerExceptions));
+        }
+
+        // Wait for losing tasks to finish before cleanup.
+        try
+        {
+            await Task.WhenAll(allTasks.Where(t => t != successTask)).ConfigureAwait(false);
+        }
+        catch
+        {
+            // We don't care if losing tasks throw.
         }
 
         // I don't know if this is possible but MAKE SURE that we don't get two sockets completing at once.

@@ -9,9 +9,9 @@ using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects;
 
-public abstract class SharedAppearanceSystem : EntitySystem
+public abstract partial class SharedAppearanceSystem : EntitySystem
 {
-    [Dependency] private readonly IGameTiming _timing = default!;
+    [Dependency] private IGameTiming _timing = default!;
 
     public override void Initialize()
     {
@@ -108,6 +108,32 @@ public abstract class SharedAppearanceSystem : EntitySystem
         dest.Comp.AppearanceData.Clear();
 
         foreach (var (key, value) in src.Comp.AppearanceData)
+        {
+            dest.Comp.AppearanceData[key] = value;
+        }
+
+        Dirty(dest, dest.Comp);
+        QueueUpdate(dest, dest.Comp);
+    }
+
+    /// <summary>
+    /// Appends appearance data from <c>src</c> to <c>dest</c>. If a key/value pair already exists in <c>dest</c>, it gets replaced.
+    /// If <c>src</c> has no <see cref="AppearanceComponent"/> nothing is done.
+    /// If <c>dest</c> has no <c>AppearanceComponent</c> then it is created.
+    /// </summary>
+    public void AppendData(Entity<AppearanceComponent?> src, Entity<AppearanceComponent?> dest)
+    {
+        if (!Resolve(src, ref src.Comp, false))
+            return;
+
+        AppendData(src.Comp, dest);
+    }
+
+    public void AppendData(AppearanceComponent srcComp, Entity<AppearanceComponent?> dest)
+    {
+        dest.Comp ??= EnsureComp<AppearanceComponent>(dest);
+
+        foreach (var (key, value) in srcComp.AppearanceData)
         {
             dest.Comp.AppearanceData[key] = value;
         }

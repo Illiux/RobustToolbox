@@ -131,6 +131,16 @@ namespace Robust.Shared.ContentPack
                 return false;
             }
 
+#pragma warning disable RA0004
+            var loadedConfig = _config.Result;
+#pragma warning restore RA0004
+
+            if (!loadedConfig.AllowedAssemblyPrefixes.Any(allowedNamePrefix => asmName.StartsWith(allowedNamePrefix)))
+            {
+                _sawmill.Error($"Assembly name '{asmName}' is not allowed for a content assembly");
+                return false;
+            }
+
             if (VerifyIL)
             {
                 if (!DoVerifyIL(asmName, resolver, peReader, reader))
@@ -179,10 +189,6 @@ namespace Robust.Shared.ContentPack
                 return true;
             }
 
-#pragma warning disable RA0004
-            var loadedConfig = _config.Result;
-#pragma warning restore RA0004
-
             var badRefs = new ConcurrentBag<EntityHandle>();
 
             // We still do explicit type reference scanning, even though the actual whitelists work with raw members.
@@ -221,6 +227,8 @@ namespace Robust.Shared.ContentPack
 #if TOOLS
             if (!badRefs.IsEmpty)
             {
+                _sawmill.Info("Started search for originator of bad references...");
+
                 ReportBadReferences(peReader, reader, badRefs);
             }
 #endif
@@ -244,7 +252,7 @@ namespace Robust.Shared.ContentPack
             Parallel.ForEach(partitioner.GetPartitions(Environment.ProcessorCount), handle =>
             {
                 var ver = new Verifier(resolver);
-                ver.SetSystemModuleName(new AssemblyName(SystemAssemblyName));
+                ver.SetSystemModuleName(new AssemblyNameInfo(SystemAssemblyName));
                 while (handle.MoveNext())
                 {
                     foreach (var result in ver.Verify(peReader, handle.Current, verifyMethods: true))
@@ -292,6 +300,9 @@ namespace Robust.Shared.ContentPack
 
                 verifyErrors = true;
                 _sawmill.Error(msg);
+
+                if (!res.Method.IsNil)
+                    PrintCompilerGeneratedMethodUsage(peReader, reader, res.Method);
             }
 
             _sawmill.Debug($"{name}: Verified IL in {sw.Elapsed.TotalMilliseconds}ms");
@@ -302,6 +313,24 @@ namespace Robust.Shared.ContentPack
             }
 
             return true;
+        }
+
+        private void PrintCompilerGeneratedMethodUsage(
+            PEReader peReader,
+            MetadataReader reader,
+            MethodDefinitionHandle method)
+        {
+#if TOOLS
+            var methodDef = reader.GetMethodDefinition(method);
+            var type = GetTypeFromDefinition(reader, methodDef.GetDeclaringType());
+
+            if (!type.Name.Contains('<'))
+                return;
+
+            _sawmill.Error("Hint: method is compiler-generated. Check for params collections and/or collection expressions:");
+
+            ReportBadReferences(peReader, reader, [method]);
+#endif
         }
 
         private static string FormatMethodName(MetadataReader reader, MethodDefinition method)
@@ -926,12 +955,12 @@ namespace Robust.Shared.ContentPack
                 return null;
             }
 
-            public PEReader? ResolveAssembly(AssemblyName assemblyName)
+            public PEReader? ResolveAssembly(AssemblyNameInfo assemblyName)
             {
                 return _dictionary.GetOrAdd(assemblyName.Name!, ResolveCore);
             }
 
-            public PEReader? ResolveModule(AssemblyName referencingAssembly, string fileName)
+            public PEReader? ResolveModule(AssemblyNameInfo referencingAssembly, string fileName)
             {
                 throw new NotSupportedException();
             }

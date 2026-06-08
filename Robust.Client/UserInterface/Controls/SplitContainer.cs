@@ -176,6 +176,7 @@ namespace Robust.Client.UserInterface.Controls
             set
             {
                 _orientation = value;
+                _splitDragArea.DefaultCursorShape = Vertical ? CursorShape.VResize : CursorShape.HResize;
                 InvalidateMeasure();
             }
         }
@@ -185,10 +186,23 @@ namespace Robust.Client.UserInterface.Controls
             MouseFilter = MouseFilterMode.Stop;
             AddChild(_splitDragArea);
             _splitDragArea.Visible = _resizeMode != SplitResizeMode.NotResizable;
-            _splitDragArea.DefaultCursorShape =  Vertical ? CursorShape.VResize : CursorShape.HResize;
+            _splitDragArea.DefaultCursorShape = Vertical ? CursorShape.VResize : CursorShape.HResize;
             _splitDragArea.OnMouseUp += StopDragging;
             _splitDragArea.OnMouseDown += StartDragging;
             _splitDragArea.OnMouseMove += OnMove;
+        }
+
+        /// <summary>
+        /// Swaps the position of the first and zeroeth children; for a 2-control viewport it effectively flips them.
+        /// </summary>
+        public void Flip()
+        {
+            if (ChildCount < 3)
+                return;
+
+            DebugTools.Assert(ChildCount <= 3);
+            GetChild(1).SetPositionFirst();
+            InvalidateArrange();
         }
 
         private void OnMove(GUIMouseMoveEventArgs args)
@@ -255,12 +269,15 @@ namespace Robust.Client.UserInterface.Controls
                 var first = GetChild(0);
                 var second = GetChild(1);
 
-                firstMinSize ??= (Vertical ? first.DesiredSize.Y : first.DesiredSize.X);
-                secondMinSize ??= (Vertical ? second.DesiredSize.Y : second.DesiredSize.X);
-                var size = Vertical ? controlSize.Y : controlSize.X;
+                if (first.IsMeasureValid && second.IsMeasureValid)
+                {
+                    firstMinSize ??= (Vertical ? first.DesiredSize.Y : first.DesiredSize.X);
+                    secondMinSize ??= (Vertical ? second.DesiredSize.Y : second.DesiredSize.X);
+                    var size = Vertical ? controlSize.Y : controlSize.X;
 
-                _splitStart = MathHelper.Clamp(_splitStart, firstMinSize.Value,
-                    size - (secondMinSize.Value + _splitWidth));
+                    _splitStart = MathHelper.Clamp(_splitStart, firstMinSize.Value,
+                        size - (secondMinSize.Value + _splitWidth));
+                }
             }
         }
 

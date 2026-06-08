@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Contracts;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Robust.Shared.Map;
@@ -53,8 +54,14 @@ public abstract partial class SharedTransformSystem
             return MapCoordinates.Nullspace;
         }
 
-        var worldPos = Vector2.Transform(coordinates.Position, GetWorldMatrix(xform));
-        return new MapCoordinates(worldPos, xform.MapID);
+        Vector2 pos = xform._localRotation.RotateVec(coordinates.Position) + xform._localPosition;
+
+        while (xform.ParentUid != xform.MapUid && xform.ParentUid.IsValid())
+        {
+            xform = XformQuery.GetComponent(xform.ParentUid);
+            pos = xform._localRotation.RotateVec(pos) + xform._localPosition;
+        }
+        return new MapCoordinates(pos, xform.MapID);
     }
 
     /// <summary>
@@ -65,6 +72,41 @@ public abstract partial class SharedTransformSystem
     {
         var eCoords = GetCoordinates(coordinates);
         return ToMapCoordinates(eCoords);
+    }
+
+    /// <summary>
+    /// Converts entity-local coordinates into map terms.
+    /// The same as ToMapCoordinates(coordinates, logError).Position, but doesn't have to construct the MapCoordinates first.
+    /// </summary>
+    public Vector2 ToWorldPosition(EntityCoordinates coordinates, bool logError = true)
+    {
+        if (!TryComp(coordinates.EntityId, out TransformComponent? xform))
+        {
+            if (logError)
+                Log.Error($"Attempted to convert coordinates with invalid entity: {coordinates}. Trace: {Environment.StackTrace}");
+            return Vector2.Zero;
+        }
+
+        Vector2 pos = xform._localRotation.RotateVec(coordinates.Position) + xform._localPosition;
+
+        while (xform.ParentUid != xform.MapUid && xform.ParentUid.IsValid())
+        {
+            xform = XformQuery.GetComponent(xform.ParentUid);
+            pos = xform._localRotation.RotateVec(pos) + xform._localPosition;
+        }
+
+        return pos;
+    }
+
+    /// <summary>
+    /// Converts entity-local coordinates into map terms.
+    /// The same as ToMapCoordinates(coordinates).Position, but doesn't have to construct the MapCoordinates first.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Vector2 ToWorldPosition(NetCoordinates coordinates)
+    {
+        var eCoords = GetCoordinates(coordinates);
+        return ToWorldPosition(eCoords);
     }
 
     /// <summary>
@@ -91,6 +133,7 @@ public abstract partial class SharedTransformSystem
     /// <summary>
     /// Creates map-relative <see cref="EntityCoordinates"/> given some <see cref="MapCoordinates"/>.
     /// </summary>
+    [Pure]
     public EntityCoordinates ToCoordinates(MapCoordinates coordinates)
     {
         if (_map.TryGetMap(coordinates.MapId, out var uid))
@@ -104,19 +147,22 @@ public abstract partial class SharedTransformSystem
     /// <summary>
     /// Returns the grid that the entity whose position the coordinates are relative to is on.
     /// </summary>
+    [Pure]
     public EntityUid? GetGrid(EntityCoordinates coordinates)
     {
         return GetGrid(coordinates.EntityId);
     }
 
+    [Pure]
     public EntityUid? GetGrid(Entity<TransformComponent?> entity)
     {
-        return !Resolve(entity, ref entity.Comp) ? null : entity.Comp.GridUid;
+        return !Resolve(entity, ref entity.Comp, logMissing:false) ? null : entity.Comp.GridUid;
     }
 
     /// <summary>
     /// Returns the Map Id these coordinates are on.
     /// </summary>
+    [Pure]
     public MapId GetMapId(EntityCoordinates coordinates)
     {
         return GetMapId(coordinates.EntityId);
@@ -124,7 +170,7 @@ public abstract partial class SharedTransformSystem
 
     public MapId GetMapId(Entity<TransformComponent?> entity)
     {
-        return !Resolve(entity, ref entity.Comp) ? MapId.Nullspace : entity.Comp.MapID;
+        return !Resolve(entity, ref entity.Comp, logMissing: false) ? MapId.Nullspace : entity.Comp.MapID;
     }
 
     /// <summary>
@@ -137,7 +183,7 @@ public abstract partial class SharedTransformSystem
 
     public EntityUid? GetMap(Entity<TransformComponent?> entity)
     {
-        return !Resolve(entity, ref entity.Comp) ? null : entity.Comp.MapUid;
+        return !Resolve(entity, ref entity.Comp, logMissing: false) ? null : entity.Comp.MapUid;
     }
 
     /// <summary>
@@ -167,10 +213,10 @@ public abstract partial class SharedTransformSystem
     /// </summary>
     public bool InRange(Entity<TransformComponent?> entA, Entity<TransformComponent?> entB,  float range)
     {
-        if (!Resolve(entA, ref entA.Comp))
+        if (!Resolve(entA, ref entA.Comp, logMissing: false))
             return false;
 
-        if (!Resolve(entB, ref entB.Comp))
+        if (!Resolve(entB, ref entB.Comp, logMissing: false))
             return false;
 
         if (!entA.Comp.ParentUid.IsValid() || !entB.Comp.ParentUid.IsValid())

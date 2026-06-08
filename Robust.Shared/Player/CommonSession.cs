@@ -20,7 +20,12 @@ internal sealed class CommonSession : ICommonSessionInternal
     public string Name { get; set; } = "<Unknown>";
 
     [ViewVariables]
-    public short Ping { get; set; }
+    public short Ping
+    {
+        get => Channel?.Ping ?? _ping;
+        set => _ping = value;
+    }
+    private short _ping;
 
     [ViewVariables]
     public DateTime ConnectedTime { get; set; }
@@ -44,6 +49,11 @@ internal sealed class CommonSession : ICommonSessionInternal
 
     [ViewVariables]
     public LoginType AuthType => Channel?.AuthType ?? default;
+
+    [ViewVariables]
+    public bool InitialPlayerListReqDone;
+    [ViewVariables]
+    public bool InitialResourcesDone;
 
     public override string ToString() => Name;
 

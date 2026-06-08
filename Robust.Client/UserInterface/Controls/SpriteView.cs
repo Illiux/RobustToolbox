@@ -170,6 +170,7 @@ namespace Robust.Client.UserInterface.Controls
 
             Entity = new(uid.Value, sprite, xform);
             NetEnt = EntMan.GetNetEntity(uid);
+            InvalidateMeasure();
         }
 
         protected override Vector2 MeasureOverride(Vector2 availableSize)
@@ -224,7 +225,7 @@ namespace Robust.Client.UserInterface.Controls
             _spriteSize = new Vector2(longestRotatedSide, longestRotatedSide);
         }
 
-        internal override void DrawInternal(IRenderHandle renderHandle)
+        protected internal override void Draw(IRenderHandle renderHandle)
         {
             if (!ResolveEntity(out var uid, out var sprite, out var xform))
                 return;
@@ -245,7 +246,7 @@ namespace Robust.Client.UserInterface.Controls
 
             var offset = SpriteOffset
                 ? Vector2.Zero
-                : - (-_eyeRotation).RotateVec(sprite.Offset) * new Vector2(1, -1) * EyeManager.PixelsPerMeter;
+                : - (-_eyeRotation).RotateVec(sprite.Offset * _scale) * new Vector2(1, -1) * EyeManager.PixelsPerMeter;
 
             var position = PixelSize / 2 + offset * stretch * UIScale;
             var scale = Scale * UIScale * stretch;
