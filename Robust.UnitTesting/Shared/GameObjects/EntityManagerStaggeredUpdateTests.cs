@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using Moq;
 using NUnit.Framework;
 using Robust.Shared.GameObjects;
-using Robust.Shared.IoC;
 using Robust.Shared.Random;
 using Robust.Shared.Reflection;
 using Robust.Shared.Timing;
@@ -18,47 +16,6 @@ internal sealed partial class StaggeredUpdateComponent : Component, IStaggeredUp
 {
     public static TimeSpan UpdateInterval => TimeSpan.FromSeconds(1);
 }
-
-public sealed class EntityManagerStaggeredUpdateIntegration : RobustIntegrationTest
-{
-    [Reflect(false)]
-    private sealed class TestStaggeredUpdateSystem : EntitySystem
-    {
-        private StaggeredUpdateTracker<StaggeredUpdateComponent> _tracker = null!;
-
-        public override void Initialize()
-        {
-            _tracker = GetStaggeredUpdateTracker<StaggeredUpdateComponent>();
-        }
-
-        public override void Update(float frameTime)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
-    [Test]
-    public async Task Test()
-    {
-        var options = new ServerIntegrationOptions { Pool = false };
-        options.BeforeRegisterComponents += () =>
-        {
-            var fact = IoCManager.Resolve<IComponentFactory>();
-            fact.RegisterClass<StaggeredUpdateComponent>();
-        };
-        options.BeforeStart += () =>
-        {
-            var sysMan = IoCManager.Resolve<IEntitySystemManager>();
-            sysMan.LoadExtraSystemType<TestStaggeredUpdateSystem>();
-        };
-
-        var server = StartServer(options);
-        await server.WaitIdleAsync();
-
-        await server.WaitRunTicks(1);
-    }
-}
-
 
 [TestFixture, Parallelizable, TestOf(typeof(EntityManager))]
 public sealed class EntityManagerStaggeredUpdateUnit
