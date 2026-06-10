@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading.Tasks;
 using Moq;
 using NUnit.Framework;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
-using Robust.Shared.Log;
 using Robust.Shared.Random;
 using Robust.Shared.Reflection;
 using Robust.Shared.Timing;
@@ -18,12 +16,7 @@ namespace Robust.UnitTesting.Shared.GameObjects;
 [Reflect(false)]
 internal sealed partial class StaggeredUpdateComponent : Component, IStaggeredUpdate
 {
-    public StaggeredUpdateComponent(TimeSpan interval)
-    {
-        UpdateInterval = interval;
-    }
-
-    public TimeSpan UpdateInterval { get; }
+    public static TimeSpan UpdateInterval => TimeSpan.FromSeconds(1);
 }
 
 public sealed class EntityManagerStaggeredUpdateIntegration : RobustIntegrationTest
@@ -68,16 +61,15 @@ public sealed class EntityManagerStaggeredUpdateIntegration : RobustIntegrationT
 
 
 [TestFixture, Parallelizable, TestOf(typeof(EntityManager))]
-[SuppressMessage("ReSharper", "AccessToStaticMemberViaDerivedType")]
 public sealed class EntityManagerStaggeredUpdateUnit
 {
     private const int TickRate = 10;
     private static MapInitEvent _mapInitEventInstance = new();
 
     private readonly Dictionary<EntityUid, IComponent> _components = [];
+    private readonly HashSet<EntityUid> _paused = [];
+
     private EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent> _onMapInit = null!;
-    private EntityEventRefHandler<StaggeredUpdateComponent, EntityPausedEvent> _onEntityPaused = null!;
-    private EntityEventRefHandler<StaggeredUpdateComponent, EntityUnpausedEvent> _onEntityUnpaused = null!;
     private StaggeredUpdateTracker<StaggeredUpdateComponent> _updateTracker = null!;
     private Mock<IRobustRandom> _random = null!;
     private GameTiming _timing = null!;
@@ -86,26 +78,27 @@ public sealed class EntityManagerStaggeredUpdateUnit
     public void Before()
     {
         List<EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent>> onMapInit = [];
-        List<EntityEventRefHandler<StaggeredUpdateComponent, EntityPausedEvent>> onEntityPaused = [];
-        List<EntityEventRefHandler<StaggeredUpdateComponent, EntityUnpausedEvent>> onEntityUnpaused = [];
 
         var subs = new Mock<EntitySystem.ISubscriptions>();
         subs.CaptureLocalSubscription(onMapInit);
-        subs.CaptureLocalSubscription(onEntityPaused);
-        subs.CaptureLocalSubscription(onEntityUnpaused);
+
+
+        var manager = new Mock<IEntityManager>();
+        var query = new EntityQuery<StaggeredUpdateComponent>(null, _components);
+        manager.Setup(m => m.IsPaused(It.IsAny<EntityUid>(), It.IsAny<MetaDataComponent>()))
+            .Returns((EntityUid uid, MetaDataComponent _) => _paused.Contains(uid));
+        manager.Setup(m => m.GetEntityQuery<StaggeredUpdateComponent>()).Returns(query);
 
         _random = new Mock<IRobustRandom>();
         _timing = new GameTiming { TickRate = TickRate };
-        var query = new EntityQuery<StaggeredUpdateComponent>(_components, new Mock<ISawmill>().Object);
         _updateTracker = new StaggeredUpdateTracker<StaggeredUpdateComponent>(
+            null,
             subs.Object,
-            query,
+            manager.Object,
             _random.Object,
             _timing);
 
         _onMapInit = onMapInit[0];
-        //_onEntityPaused = onEntityPaused[0];
-        //_onEntityUnpaused = onEntityUnpaused[0];
     }
 
     [TearDown]
@@ -118,7 +111,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
     public void TestRemovedComponentsAreUntracked()
     {
         var entity = new EntityUid(1);
-        var comp = new StaggeredUpdateComponent(TimeSpan.FromSeconds(1));
+        var comp = new StaggeredUpdateComponent();
         _components.Add(entity, comp);
         _onMapInit.Invoke(WrapEnt(entity, comp), ref _mapInitEventInstance);
 
@@ -141,7 +134,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
     public void TestDoubleAdd()
     {
         var entity = new EntityUid(1);
-        var comp = new StaggeredUpdateComponent(TimeSpan.FromSeconds(1));
+        var comp = new StaggeredUpdateComponent();
         _components.Add(entity, comp);
         _onMapInit.Invoke(WrapEnt(entity, comp), ref _mapInitEventInstance);
 
@@ -159,7 +152,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
     public void TestRegularUpdate()
     {
         var entity = new EntityUid(1);
-        var comp = new StaggeredUpdateComponent(TimeSpan.FromSeconds(1));
+        var comp = new StaggeredUpdateComponent();
         _components.Add(entity, comp);
         SetRandomOffset(1);
         _onMapInit.Invoke(WrapEnt(entity, comp), ref _mapInitEventInstance);

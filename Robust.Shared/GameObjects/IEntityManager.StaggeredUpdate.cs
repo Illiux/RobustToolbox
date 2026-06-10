@@ -1,9 +1,9 @@
-using System.Collections.Generic;
-
 namespace Robust.Shared.GameObjects;
 
 public partial interface IEntityManager
 {
     StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
-        EntitySystem.ISubscriptions subs) where TComp : IComponent, IStaggeredUpdate;
+        EntityEventRefHandler<TComp, MapInitEvent>? mapInit,
+        EntitySystem.ISubscriptions subs
+    ) where TComp : IComponent, IStaggeredUpdate;
 }
