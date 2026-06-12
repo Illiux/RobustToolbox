@@ -12,11 +12,10 @@ public partial class EntityManager
     [IoC.Dependency] private IRobustRandom _rng = default!;
 
     public StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
-        EntityEventRefHandler<TComp, MapInitEvent>? mapInit,
-        EntitySystem.ISubscriptions subs
+        EntityEventRefHandler<TComp, MapInitEvent>? mapInit
     ) where TComp : IComponent, IStaggeredUpdate
     {
-        return new StaggeredUpdateTracker<TComp>(mapInit, subs, GetEntityQuery<TComp>(), MetaQuery, _rng, _gameTiming);
+        return new StaggeredUpdateTracker<TComp>(mapInit, GetEntityQuery<TComp>(), MetaQuery, _rng, _gameTiming);
     }
 }
 
@@ -41,7 +40,6 @@ public sealed class StaggeredUpdateTracker<TComp>
 
     internal StaggeredUpdateTracker(
         EntityEventRefHandler<TComp, MapInitEvent>? mapInit,
-        EntitySystem.ISubscriptions subs,
         EntityQuery<TComp> compQuery,
         EntityQuery<MetaDataComponent> metaQuery,
         IRobustRandom rng,
@@ -60,11 +58,9 @@ public sealed class StaggeredUpdateTracker<TComp>
         _metaQuery = metaQuery;
         _rng = rng;
         _timing = timing;
-
-        subs.SubscribeLocalEvent<TComp, MapInitEvent>(OnMapInit);
     }
 
-    private void OnMapInit(Entity<TComp> ent, ref MapInitEvent args)
+    internal void OnMapInit(Entity<TComp> ent, ref MapInitEvent args)
     {
         _mapInit?.Invoke(ent, ref args); // call a chained event handler if we have one
 

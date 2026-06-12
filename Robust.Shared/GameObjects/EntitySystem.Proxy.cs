@@ -1228,10 +1228,11 @@ public partial class EntitySystem
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
-        EntityEventRefHandler<TComp, MapInitEvent>? mapInit = default
-    ) where TComp : IComponent, IStaggeredUpdate
+        EntityEventRefHandler<TComp, MapInitEvent>? mapInit = default) where TComp : IComponent, IStaggeredUpdate
     {
-        return EntityManager.GetStaggeredUpdateTracker(mapInit, Subs);
+        var tracker = EntityManager.GetStaggeredUpdateTracker(mapInit);
+        SubscribeLocalEvent<TComp, MapInitEvent>(tracker.OnMapInit);
+        return tracker;
     }
     #endregion
 

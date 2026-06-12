@@ -37,7 +37,6 @@ public sealed class EntityManagerStaggeredUpdateUnit
     private readonly Dictionary<EntityUid, IComponent> _components = [];
     private readonly Dictionary<EntityUid, IComponent> _metas = [];
 
-    private EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent> _onMapInit = null!;
     private StaggeredUpdateTracker<StaggeredUpdateComponent> _updateTracker = null!;
     private Mock<IRobustRandom> _random = null!;
     private GameTiming _timing = null!;
@@ -219,34 +218,27 @@ public sealed class EntityManagerStaggeredUpdateUnit
     {
         List<EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent>> onMapInit = [];
 
-        var subs = new Mock<EntitySystem.ISubscriptions>();
-        subs.CaptureLocalSubscription(onMapInit);
-
         var compQuery = new EntityQuery<StaggeredUpdateComponent>(null, _components);
         var metaQuery = new EntityQuery<MetaDataComponent>(null, _metas);
 
         var tracker = new StaggeredUpdateTracker<StaggeredUpdateComponent>(
             chainedHandler,
-            subs.Object,
             compQuery,
             metaQuery,
             _random.Object,
             _timing);
 
-        _onMapInit = onMapInit[0];
         return tracker;
     }
 
     private void CreateUpdateTrackerNoCapture<TComp>()
         where TComp : IComponent, IStaggeredUpdate
     {
-        var subs = new Mock<EntitySystem.ISubscriptions>();
         var compQuery = new EntityQuery<TComp>(null, _components);
         var metaQuery = new EntityQuery<MetaDataComponent>(null, _metas);
 
         _ = new StaggeredUpdateTracker<TComp>(
             null,
-            subs.Object,
             compQuery,
             metaQuery,
             _random.Object,
@@ -264,7 +256,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
 
     private void MapInit(EntityUid entity, StaggeredUpdateComponent comp)
     {
-        _onMapInit.Invoke(WrapEnt(entity, comp), ref _mapInitEventInstance);
+        _updateTracker.OnMapInit(WrapEnt(entity, comp), ref _mapInitEventInstance);
     }
 
     private static List<(EntityUid, TComp)> ToList<TComp>(StaggeredUpdateTracker<TComp> tracker)
