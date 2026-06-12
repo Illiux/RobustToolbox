@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Moq;
 using NUnit.Framework;
 using Robust.Shared.GameObjects;
@@ -14,8 +13,7 @@ namespace Robust.UnitTesting.Shared.GameObjects;
 [Reflect(false)]
 internal sealed partial class StaggeredUpdateComponent : Component, IStaggeredUpdate
 {
-    public static TimeSpan UpdateInterval => TimeSpan.FromSeconds(1);
-}
+    public static TimeSpan UpdateInterval => TimeSpan.FromSeconds(1); }
 
 [TestFixture, Parallelizable, TestOf(typeof(EntityManager))]
 public sealed class EntityManagerStaggeredUpdateUnit
@@ -24,7 +22,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
     private static MapInitEvent _mapInitEventInstance = new();
 
     private readonly Dictionary<EntityUid, IComponent> _components = [];
-    private readonly HashSet<EntityUid> _paused = [];
+    private readonly Dictionary<EntityUid, IComponent> _metas = [];
 
     private EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent> _onMapInit = null!;
     private StaggeredUpdateTracker<StaggeredUpdateComponent> _updateTracker = null!;
@@ -43,7 +41,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
     public void After()
     {
         _components.Clear();
-        _paused.Clear();
+        _metas.Clear();
     }
 
     [Test]
@@ -53,16 +51,16 @@ public sealed class EntityManagerStaggeredUpdateUnit
         var comp = CreateComponent(entity);
 
         _timing.CurTick += _timing.TickRate;
-        Assert.That(_updateTracker.ToList(), Contains.Item((entity, comp)));
+        Assert.That(ToList(_updateTracker), Contains.Item((entity, comp)));
 
         _timing.CurTick += _timing.TickRate;
         _components.Remove(entity);
-        Assert.That(_updateTracker.ToList(), Is.Empty);
+        Assert.That(ToList(_updateTracker), Is.Empty);
 
         _timing.CurTick += _timing.TickRate;
         _components.Add(entity, comp);
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Is.Empty,
             "Do not return the entity, even when the component is added back");
     }
@@ -75,12 +73,12 @@ public sealed class EntityManagerStaggeredUpdateUnit
 
         _components.Remove(entity);
         _timing.CurTick += 1;
-        Assert.That(_updateTracker.ToList(), Is.Empty);
+        Assert.That(ToList(_updateTracker), Is.Empty);
 
         _components.Add(entity, comp);
         MapInit(entity, comp);
         _timing.CurTick += _timing.TickRate;
-        Assert.That(_updateTracker.ToList(), Has.Exactly(1).EqualTo((entity, comp)));
+        Assert.That(ToList(_updateTracker), Has.Exactly(1).EqualTo((entity, comp)));
     }
 
     [Test]
@@ -91,23 +89,23 @@ public sealed class EntityManagerStaggeredUpdateUnit
         var comp = CreateComponent(entity);
 
         _timing.CurTick += 1;
-        Assert.That(_updateTracker.ToList(), Is.Empty);
+        Assert.That(ToList(_updateTracker), Is.Empty);
 
         _timing.CurTick += 1;
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Contains.Item((entity, comp)),
             "Update after exactly offset + 1 ticks");
 
         _timing.CurTick += (byte)(_timing.TickRate - 1);
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Is.Empty,
             "Only return entity once until time is advanced by a full second");
 
         _timing.CurTick += 1;
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Contains.Item((entity, comp)),
             "Update exactly one second after previous update");
     }
@@ -119,23 +117,23 @@ public sealed class EntityManagerStaggeredUpdateUnit
         SetRandomOffset(0);
         var comp = CreateComponent(entity);
 
-        _paused.Add(entity);
+        ((MetaDataComponent)_metas[entity]).PauseTime = TimeSpan.MinValue;
         _timing.CurTick += 1;
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Is.Empty,
             "Paused entities do not update even when their scheduled time has elapsed");
 
-        _paused.Remove(entity);
+        ((MetaDataComponent)_metas[entity]).PauseTime = null;
         _timing.CurTick += (byte)(_timing.TickRate - 1);
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Is.Empty,
             "The skipped update is not replayed immediately when the entity is unpaused");
 
         _timing.CurTick += 1;
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Contains.Item((entity, comp)),
             "The entity updates again on its next scheduled interval after being unpaused");
     }
@@ -154,16 +152,16 @@ public sealed class EntityManagerStaggeredUpdateUnit
         var lateComp = CreateComponent(lateEntity);
 
         _timing.CurTick += 1;
-        Assert.That(_updateTracker.ToList(), Is.EqualTo([(earlyEntity, earlyComp)]));
+        Assert.That(ToList(_updateTracker), Is.EqualTo([(earlyEntity, earlyComp)]));
 
         _timing.CurTick += 4;
         Assert.That(
-            _updateTracker.ToList(),
+            ToList(_updateTracker),
             Is.Empty,
             "The later entity should not update before its own randomized offset has elapsed");
 
         _timing.CurTick += 1;
-        Assert.That(_updateTracker.ToList(), Is.EqualTo([(lateEntity, lateComp)]));
+        Assert.That(ToList(_updateTracker), Is.EqualTo([(lateEntity, lateComp)]));
     }
 
     [Test]
@@ -202,16 +200,14 @@ public sealed class EntityManagerStaggeredUpdateUnit
         var subs = new Mock<EntitySystem.ISubscriptions>();
         subs.CaptureLocalSubscription(onMapInit);
 
-        var manager = new Mock<IEntityManager>();
-        var query = new EntityQuery<StaggeredUpdateComponent>(null, _components);
-        manager.Setup(m => m.IsPaused(It.IsAny<EntityUid>(), It.IsAny<MetaDataComponent>()))
-            .Returns((EntityUid uid, MetaDataComponent _) => _paused.Contains(uid));
-        manager.Setup(m => m.GetEntityQuery<StaggeredUpdateComponent>()).Returns(query);
+        var compQuery = new EntityQuery<StaggeredUpdateComponent>(null, _components);
+        var metaQuery = new EntityQuery<MetaDataComponent>(null, _metas);
 
         var tracker = new StaggeredUpdateTracker<StaggeredUpdateComponent>(
             chainedHandler,
             subs.Object,
-            manager.Object,
+            compQuery,
+            metaQuery,
             _random.Object,
             _timing);
 
@@ -223,6 +219,7 @@ public sealed class EntityManagerStaggeredUpdateUnit
     {
         var comp = new StaggeredUpdateComponent();
         _components.Add(entity, comp);
+        _metas.Add(entity, new MetaDataComponent());
         MapInit(entity, comp);
         return comp;
     }
@@ -230,6 +227,19 @@ public sealed class EntityManagerStaggeredUpdateUnit
     private void MapInit(EntityUid entity, StaggeredUpdateComponent comp)
     {
         _onMapInit.Invoke(WrapEnt(entity, comp), ref _mapInitEventInstance);
+    }
+
+    private static List<(EntityUid, TComp)> ToList<TComp>(StaggeredUpdateTracker<TComp> tracker)
+        where TComp : IComponent, IStaggeredUpdate
+    {
+        var ret = new List<(EntityUid, TComp)>();
+        var t = tracker.GetEnumerator();
+        while (t.MoveNext(out var uid, out var comp))
+        {
+            ret.Add((uid, comp));
+        }
+
+        return ret;
     }
 
     private Entity<StaggeredUpdateComponent> WrapEnt(EntityUid entity, StaggeredUpdateComponent comp)

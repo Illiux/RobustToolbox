@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using Robust.Shared.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Robust.Shared.Random;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
@@ -18,7 +19,7 @@ public partial class EntityManager
         EntitySystem.ISubscriptions subs
     ) where TComp : IComponent, IStaggeredUpdate
     {
-        return new StaggeredUpdateTracker<TComp>(mapInit, subs, this, _rng, _timing);
+        return new StaggeredUpdateTracker<TComp>(mapInit, subs, GetEntityQuery<TComp>(), MetaQuery, _rng, _timing);
     }
 }
 
@@ -27,31 +28,32 @@ public interface IStaggeredUpdate
     static abstract TimeSpan UpdateInterval { get; }
 }
 
-public sealed class StaggeredUpdateTracker<TComp> : IEnumerable<(EntityUid entity, TComp comp)>
+public sealed class StaggeredUpdateTracker<TComp>
     where TComp : IComponent, IStaggeredUpdate
 {
     private readonly PriorityQueue<EntityUid, TimeSpan> _insertQueue = new();
     private readonly RingBufferList<(EntityUid entity, TimeSpan when)> _schedule = [];
     private readonly HashSet<EntityUid> _tracked = [];
 
-    private readonly EntityQuery<TComp> _query;
+    private readonly EntityQuery<TComp> _compQuery;
+    private readonly EntityQuery<MetaDataComponent> _metaQuery;
     private readonly IRobustRandom _rng;
     private readonly IGameTiming _timing;
     private readonly TimeSpan _updateInterval;
-    private readonly IEntityManager _entityManager;
     private readonly EntityEventRefHandler<TComp, MapInitEvent>? _mapInit;
 
     internal StaggeredUpdateTracker(
         EntityEventRefHandler<TComp, MapInitEvent>? mapInit,
         EntitySystem.ISubscriptions subs,
-        IEntityManager entityManager,
+        EntityQuery<TComp> compQuery,
+        EntityQuery<MetaDataComponent> metaQuery,
         IRobustRandom rng,
         IGameTiming timing)
     {
         _mapInit = mapInit;
         _updateInterval = TComp.UpdateInterval;
-        _entityManager = entityManager;
-        _query = entityManager.GetEntityQuery<TComp>();
+        _compQuery = compQuery;
+        _metaQuery = metaQuery;
         _rng = rng;
         _timing = timing;
 
@@ -70,85 +72,67 @@ public sealed class StaggeredUpdateTracker<TComp> : IEnumerable<(EntityUid entit
         _insertQueue.Enqueue(ent.Owner, when);
     }
 
-    public IEnumerator<(EntityUid, TComp)> GetEnumerator()
+    public Enumerator GetEnumerator()
     {
         return new Enumerator(this);
     }
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
-
-    private struct Enumerator(StaggeredUpdateTracker<TComp> tracker) : IEnumerator<(EntityUid entity, TComp comp)>
+    public readonly struct Enumerator(StaggeredUpdateTracker<TComp> tracker)
     {
         private readonly TimeSpan _until = tracker._timing.CurTime;
 
-        public (EntityUid entity, TComp comp) Current { get; private set; }
-        object IEnumerator.Current => Current;
-
-        public bool MoveNext()
+        public bool MoveNext(out EntityUid uid, [NotNullWhen(true)] out TComp? comp)
         {
-            while (TryExtract(out var entity, out var when))
+            while (true)
             {
+                TimeSpan when;
+
+                // the next entity may come either from the insertion list or the schedule, whichever is sooner
+                var queueWhen = tracker._insertQueue.TryPeek(out var queueEnt, out var w)
+                    ? w
+                    : TimeSpan.MaxValue;
+                var (schedEnt, schedWhen) = tracker._schedule.Count > 0
+                    ? tracker._schedule[0]
+                    : (default, TimeSpan.MaxValue);
+
+                if (schedWhen > _until && queueWhen > _until)
+                {
+                    uid = default;
+                    comp = default;
+                    return false;
+                }
+
+                if (queueWhen < schedWhen)
+                {
+                    tracker._insertQueue.Dequeue();
+                    uid = queueEnt;
+                    when = queueWhen;
+                }
+                else
+                {
+                    tracker._schedule.RemoveAt(0);
+                    uid = schedEnt;
+                    when = schedWhen;
+                }
+
                 // since we only schedule when the component can be resolved, entities where the component has been
                 // deleted are dropped from the tracker
-                if (tracker._query.TryComp(entity, out var comp))
+                if (tracker._compQuery.TryComp(uid, out comp))
                 {
-                    tracker._schedule.Add((entity, when + tracker._updateInterval));
+                    tracker._schedule.Add((uid, when + tracker._updateInterval));
 
-                    if (tracker._entityManager.IsPaused(entity)) continue;
+                    if (!tracker._metaQuery.TryGetComponentInternal(uid, out var metaComp)
+                        || metaComp.EntityPaused)
+                    {
+                        continue;
+                    }
 
-                    // If it's not paused, yield it from the enumerator
-                    Current = (entity, comp);
                     return true;
                 }
 
                 // if our component is missing, stop tracking this entity
-                tracker._tracked.Remove(entity);
+                tracker._tracked.Remove(uid);
             }
-
-            return false;
-        }
-
-        private bool TryExtract(out EntityUid entity, out TimeSpan when)
-        {
-            // the next entity may come either from the insertion list or the schedule, whichever is sooner
-            var queueWhen = tracker._insertQueue.TryPeek(out var queueEnt, out var w)
-                ? w
-                : TimeSpan.MaxValue;
-            var (schedEnt, schedWhen) = tracker._schedule.TryGetValue(0, out var s)
-                ? s
-                : (default, TimeSpan.MaxValue);
-
-            if (schedWhen > _until && queueWhen > _until)
-            {
-                entity = default;
-                when = TimeSpan.MaxValue;
-                return false;
-            }
-
-            if (queueWhen < schedWhen)
-            {
-                tracker._insertQueue.Dequeue();
-                entity = queueEnt;
-                when = queueWhen;
-                return true;
-            }
-
-            tracker._schedule.RemoveAt(0);
-            entity = schedEnt;
-            when = schedWhen;
-            return true;
-        }
-
-        public void Reset()
-        {
-            throw new NotSupportedException();
-        }
-
-        void IDisposable.Dispose()
-        {
         }
     }
 }
