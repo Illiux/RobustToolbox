@@ -47,6 +47,13 @@ public sealed class StaggeredUpdateTracker<TComp>
         IRobustRandom rng,
         IGameTiming timing)
     {
+        if (TComp.UpdateInterval <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException(
+                $"{typeof(TComp)} has an invalid staggered update interval: {_updateInterval}. " +
+                "Staggered update interval must be positive and non-zero.");
+        }
+
         _mapInit = mapInit;
         _updateInterval = TComp.UpdateInterval;
         _compQuery = compQuery;

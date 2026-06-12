@@ -16,6 +16,18 @@ internal sealed partial class StaggeredUpdateComponent : Component, IStaggeredUp
     public static TimeSpan UpdateInterval => TimeSpan.FromSeconds(1);
 }
 
+[Reflect(false)]
+internal sealed partial class ZeroIntervalStaggeredUpdateComponent : Component, IStaggeredUpdate
+{
+    public static TimeSpan UpdateInterval => TimeSpan.Zero;
+}
+
+[Reflect(false)]
+internal sealed partial class NegativeIntervalStaggeredUpdateComponent : Component, IStaggeredUpdate
+{
+    public static TimeSpan UpdateInterval => TimeSpan.FromTicks(-1);
+}
+
 [TestFixture, Parallelizable, TestOf(typeof(EntityManager))]
 public sealed class EntityManagerStaggeredUpdateUnit
 {
@@ -187,6 +199,15 @@ public sealed class EntityManagerStaggeredUpdateUnit
         }
     }
 
+    [Test]
+    public void TestUpdateIntervalMustBePositive()
+    {
+        Assert.Throws<InvalidOperationException>(
+            CreateUpdateTrackerNoCapture<ZeroIntervalStaggeredUpdateComponent>);
+        Assert.Throws<InvalidOperationException>(
+            CreateUpdateTrackerNoCapture<NegativeIntervalStaggeredUpdateComponent>);
+    }
+
     private void SetRandomOffset(int ticks)
     {
         _random.Setup(m => m.Next(TimeSpan.Zero, It.IsAny<TimeSpan>()))
@@ -214,6 +235,22 @@ public sealed class EntityManagerStaggeredUpdateUnit
 
         _onMapInit = onMapInit[0];
         return tracker;
+    }
+
+    private void CreateUpdateTrackerNoCapture<TComp>()
+        where TComp : IComponent, IStaggeredUpdate
+    {
+        var subs = new Mock<EntitySystem.ISubscriptions>();
+        var compQuery = new EntityQuery<TComp>(null, _components);
+        var metaQuery = new EntityQuery<MetaDataComponent>(null, _metas);
+
+        _ = new StaggeredUpdateTracker<TComp>(
+            null,
+            subs.Object,
+            compQuery,
+            metaQuery,
+            _random.Object,
+            _timing);
     }
 
     private StaggeredUpdateComponent CreateComponent(EntityUid entity)
