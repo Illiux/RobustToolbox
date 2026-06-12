@@ -1,7 +1,7 @@
 using System;
-using Robust.Shared.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using Robust.Shared.Collections;
 using Robust.Shared.Random;
 using Robust.Shared.Timing;
 
@@ -12,7 +12,7 @@ public partial class EntityManager
     [IoC.Dependency] private IRobustRandom _rng = default!;
 
     public StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
-        EntityEventRefHandler<TComp, MapInitEvent>? mapInit) where TComp : IComponent, IStaggeredUpdate
+        EntityEventRefHandler<TComp, MapInitEvent>? mapInit = default) where TComp : IComponent, IStaggeredUpdate
     {
         return new StaggeredUpdateTracker<TComp>(mapInit, GetEntityQuery<TComp>(), MetaQuery, _rng, _gameTiming);
     }
@@ -44,15 +44,16 @@ public sealed class StaggeredUpdateTracker<TComp>
         IRobustRandom rng,
         IGameTiming timing)
     {
-        if (TComp.UpdateInterval <= TimeSpan.Zero)
+        var interval = TComp.UpdateInterval;
+        if (interval <= TimeSpan.Zero)
         {
             throw new InvalidOperationException(
-                $"{typeof(TComp)} has an invalid staggered update interval: {_updateInterval}. " +
+                $"{typeof(TComp)} has an invalid staggered update interval: {interval}. " +
                 "Staggered update interval must be positive and non-zero.");
         }
 
         _mapInit = mapInit;
-        _updateInterval = TComp.UpdateInterval;
+        _updateInterval = interval;
         _compQuery = compQuery;
         _metaQuery = metaQuery;
         _rng = rng;

@@ -216,8 +216,6 @@ public sealed class EntityManagerStaggeredUpdateUnit
     private StaggeredUpdateTracker<StaggeredUpdateComponent> CreateUpdateTracker(
         EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent>? chainedHandler = null)
     {
-        List<EntityEventRefHandler<StaggeredUpdateComponent, MapInitEvent>> onMapInit = [];
-
         var compQuery = new EntityQuery<StaggeredUpdateComponent>(null, _components);
         var metaQuery = new EntityQuery<MetaDataComponent>(null, _metas);
 

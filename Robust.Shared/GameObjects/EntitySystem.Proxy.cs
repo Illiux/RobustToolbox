@@ -1227,6 +1227,7 @@ public partial class EntitySystem
     #region Staggered Update Tracker
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager))]
     protected StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
         EntityEventRefHandler<TComp, MapInitEvent>? mapInit = default) where TComp : IComponent, IStaggeredUpdate
     {
@@ -1234,6 +1235,7 @@ public partial class EntitySystem
         SubscribeLocalEvent<TComp, MapInitEvent>(tracker.OnMapInit);
         return tracker;
     }
+
     #endregion
 
     #region Networked Events
