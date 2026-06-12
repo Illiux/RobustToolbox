@@ -1,17 +1,14 @@
 using System;
-using System.Collections;
 using Robust.Shared.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Robust.Shared.Random;
 using Robust.Shared.Timing;
-using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects;
 
 public partial class EntityManager
 {
-    [IoC.Dependency] private IGameTiming _timing = default!;
     [IoC.Dependency] private IRobustRandom _rng = default!;
 
     public StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
@@ -19,7 +16,7 @@ public partial class EntityManager
         EntitySystem.ISubscriptions subs
     ) where TComp : IComponent, IStaggeredUpdate
     {
-        return new StaggeredUpdateTracker<TComp>(mapInit, subs, GetEntityQuery<TComp>(), MetaQuery, _rng, _timing);
+        return new StaggeredUpdateTracker<TComp>(mapInit, subs, GetEntityQuery<TComp>(), MetaQuery, _rng, _gameTiming);
     }
 }
 
@@ -89,6 +86,46 @@ public sealed class StaggeredUpdateTracker<TComp>
 
         public bool MoveNext(out EntityUid uid, [NotNullWhen(true)] out TComp? comp)
         {
+            if (_insertQueue.Count != 0) return MoveNextMixed(out uid, out comp);
+
+            while (_schedule.TryPeekFront(out var sched))
+            {
+                if (sched.when > _until)
+                {
+                    uid = default;
+                    comp = default;
+                    return false;
+                }
+
+                _schedule.RemoveAt(0);
+                uid = sched.entity;
+
+                // since we only schedule when the component can be resolved, entities where the component has been
+                // deleted are dropped from the tracker
+                if (_compQuery.TryComp(uid, out comp))
+                {
+                    _schedule.Add((uid, sched.when + _updateInterval));
+
+                    if (!_metaQuery.TryGetComponentInternal(uid, out var metaComp)
+                        || metaComp.EntityPaused)
+                    {
+                        continue;
+                    }
+
+                    return true;
+                }
+
+                // if our component is missing, stop tracking this entity
+                _tracked.Remove(uid);
+            }
+
+            uid = default;
+            comp = default;
+            return false;
+        }
+
+        private bool MoveNextMixed(out EntityUid uid, [NotNullWhen(true)] out TComp? comp)
+        {
             while (true)
             {
                 TimeSpan when;
@@ -97,8 +134,8 @@ public sealed class StaggeredUpdateTracker<TComp>
                 var queueWhen = _insertQueue.TryPeek(out var queueEnt, out var w)
                     ? w
                     : TimeSpan.MaxValue;
-                var (schedEnt, schedWhen) = _schedule.Count > 0
-                    ? _schedule[0]
+                var (schedEnt, schedWhen) = _schedule.TryPeekFront(out var sched)
+                    ? sched
                     : (default, TimeSpan.MaxValue);
 
                 if (schedWhen > _until && queueWhen > _until)
