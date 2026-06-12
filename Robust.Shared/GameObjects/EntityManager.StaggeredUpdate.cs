@@ -12,8 +12,7 @@ public partial class EntityManager
     [IoC.Dependency] private IRobustRandom _rng = default!;
 
     public StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
-        EntityEventRefHandler<TComp, MapInitEvent>? mapInit
-    ) where TComp : IComponent, IStaggeredUpdate
+        EntityEventRefHandler<TComp, MapInitEvent>? mapInit) where TComp : IComponent, IStaggeredUpdate
     {
         return new StaggeredUpdateTracker<TComp>(mapInit, GetEntityQuery<TComp>(), MetaQuery, _rng, _gameTiming);
     }

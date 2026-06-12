@@ -1224,7 +1224,7 @@ public partial class EntitySystem
 
     #endregion
 
-    #region Stagged Update Tracker
+    #region Staggered Update Tracker
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected StaggeredUpdateTracker<TComp> GetStaggeredUpdateTracker<TComp>(
