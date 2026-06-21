@@ -106,7 +106,7 @@ internal sealed partial class AutoNetworkingTests : RobustIntegrationTest
             clientEnt3 = client.EntMan.GetEntity(netEnt3);
             clientEnt4 = client.EntMan.GetEntity(netEnt4);
             clientEnt5 = client.EntMan.GetEntity(netEnt5);
-            clientEnt6 = client.EntMan.GetEntity(netEnt5);
+            clientEnt6 = client.EntMan.GetEntity(netEnt6);
 
             // Check that the player got properly attached.
             Assert.That(client.AttachedEntity, Is.EqualTo(cPlayer));
